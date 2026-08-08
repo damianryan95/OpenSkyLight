@@ -26,21 +26,17 @@ export function EventCard({
   color,
   timeFormat,
   peopleById,
-  onTap,
   size = 'md'
 }: {
   occ: OccurrenceDto
   color: string
   timeFormat: '12h' | '24h'
   peopleById: Map<string, PersonDto>
-  onTap: () => void
   size?: 'md' | 'lg'
 }) {
   if (occ.allDay) {
     return (
-      <button
-        type="button"
-        onClick={onTap}
+      <div
         className={`pressable flex w-full items-center gap-2 rounded-xl px-3 text-left font-bold shadow-card ${
           size === 'lg' ? 'min-h-14 text-lg' : 'min-h-11 text-[15px]'
         }`}
@@ -48,13 +44,11 @@ export function EventCard({
       >
         <span className="truncate">{occ.title}</span>
         {occ.isRecurring && <RepeatIcon size={14} className="shrink-0 opacity-70" />}
-      </button>
+      </div>
     )
   }
   return (
-    <button
-      type="button"
-      onClick={onTap}
+    <div
       className={`pressable w-full rounded-xl bg-card text-left shadow-card ${
         size === 'lg' ? 'p-4' : 'px-3 py-2'
       }`}
@@ -74,6 +68,6 @@ export function EventCard({
           <span className="truncate">{occ.location}</span>
         </div>
       )}
-    </button>
+    </div>
   )
 }

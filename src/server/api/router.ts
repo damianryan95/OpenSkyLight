@@ -1,0 +1,653 @@
+import type { IncomingMessage, ServerResponse } from 'node:http'
+import { z } from 'zod'
+import { DateTime } from 'luxon'
+import { addListItemRequestSchema, apiContract, apiInfoResponseSchema, choreCorrectionRequestSchema, configureGoogleRequestSchema, createChoreRequestSchema, createListRequestSchema, createPersonRequestSchema, createRewardRequestSchema, displayChoreCommandRequestSchema, mealRangeRequestSchema, mealSlotKindSchema, redeemRewardRequestSchema, registerDisplayRequestSchema, setCalendarSelectionRequestSchema, setMealRequestSchema, setMealTemplateRequestSchema, starAdjustmentRequestSchema, updateChoreRequestSchema, updateDisplayRequestSchema, updateHouseholdSettingsRequestSchema, updateListRequestSchema, updatePersonRequestSchema, updateRewardRequestSchema } from '../../shared/api/contract'
+import { AuthError, CSRF_HEADER, DisplayDeviceService, HouseholdAuthService, PARENT_SESSION_COOKIE } from '../auth'
+import type { ChoresRewardsService, DisplayReadService, HouseholdSettingsService, ListsDomain, MealsDomain, PeopleService } from '../domain'
+import type { EventStream, EventStreamAuthenticator } from '../events'
+import type { GoogleConfigurationVault, GoogleConnectionService, GoogleSyncScheduler } from '../sync/google'
+import type { GoogleSyncStatusService } from '../sync/google'
+import type { OnlineIconSearchService } from '../icons'
+import { ApiRequestError, readJsonBody, sendApiError, sendJson, validateApiInput } from './http'
+
+export interface ApiRouterDependencies {
+  eventStream?: EventStream
+  eventStreamAuthenticator?: EventStreamAuthenticator
+  auth?: HouseholdAuthService
+  displays?: DisplayDeviceService
+  chores?: ChoresRewardsService
+  settings?: HouseholdSettingsService
+  people?: PeopleService
+  google?: GoogleConnectionService
+  googleConfiguration?: GoogleConfigurationVault
+  googleSyncStatus?: GoogleSyncStatusService
+  googleSyncScheduler?: GoogleSyncScheduler
+  displayRead?: DisplayReadService
+  lists?: ListsDomain
+  meals?: MealsDomain
+  icons?: OnlineIconSearchService
+  /** Injectable clock for household-date authorization tests. */
+  now?: () => Date
+}
+
+const pinRequestSchema = z.object({ pin: z.string() }).strict()
+const changePinRequestSchema = z.object({ newPin: z.string() }).strict()
+
+export async function handleApiRequest(request: IncomingMessage, response: ServerResponse, dependencies: ApiRouterDependencies = {}): Promise<boolean> {
+  const method = request.method ?? 'GET'
+  const url = new URL(request.url ?? '/', 'http://localhost')
+  const path = url.pathname
+
+  if (!path.startsWith('/api/')) return false
+
+  try {
+    const auth = dependencies.auth
+    const displays = dependencies.displays
+    const rpcMatch = /^\/api\/rpc\/([^/]+)$/.exec(path)
+    if (rpcMatch !== null) {
+      if (method !== 'POST') throw new ApiRequestError(405, 'method_not_allowed', `Method ${method} is not allowed`)
+      if (auth === undefined || displays === undefined || dependencies.displayRead === undefined || dependencies.people === undefined || dependencies.lists === undefined || dependencies.meals === undefined || dependencies.chores === undefined || dependencies.settings === undefined) {
+        throw new ApiRequestError(503, 'service_unavailable', 'Display read services are unavailable')
+      }
+      const device = displays.authenticate(readBearerToken(request))
+      if (device === undefined) throw new AuthError(401, 'unauthorized', 'A registered display credential is required')
+      const channel = decodeURIComponent(rpcMatch[1])
+      const result = await handleDisplayReadRpc(channel, request, device, dependencies as Required<Pick<ApiRouterDependencies, 'auth' | 'displays' | 'displayRead' | 'people' | 'lists' | 'meals' | 'chores' | 'settings'>> & ApiRouterDependencies)
+      sendJson(response, 200, { ok: true, data: result })
+      return true
+    }
+    if (path === apiContract.syncStatus.path) {
+      if (method !== apiContract.syncStatus.method) throw new ApiRequestError(405, 'method_not_allowed', `Method ${method} is not allowed`)
+      if (dependencies.googleSyncStatus === undefined) throw new ApiRequestError(503, 'service_unavailable', 'Google sync status is unavailable')
+      sendJson(response, 200, apiContract.syncStatus.response.parse(dependencies.googleSyncStatus.get()))
+      return true
+    }
+    if (path.startsWith('/api/v1/auth/') && auth === undefined) {
+      throw new ApiRequestError(503, 'service_unavailable', 'Authentication service is unavailable')
+    }
+
+    if (path === '/api/v1/auth/status') {
+      if (method !== 'GET') throw new ApiRequestError(405, 'method_not_allowed', `Method ${method} is not allowed`)
+      const session = auth?.getParentSession(readCookie(request, PARENT_SESSION_COOKIE))
+      sendJson(response, 200, { configured: auth?.isConfigured() ?? false, authenticated: session !== undefined, expiresAt: session?.expiresAt ?? null })
+      return true
+    }
+
+    if (path === '/api/v1/auth/setup' || path === '/api/v1/auth/login') {
+      if (method !== 'POST') throw new ApiRequestError(405, 'method_not_allowed', `Method ${method} is not allowed`)
+      assertSameOrigin(request)
+      const { pin } = await readJsonBody(request, pinRequestSchema)
+      const session = path.endsWith('/setup') ? auth!.setup(pin) : auth!.login(pin)
+      setParentSessionCookie(response, request, session.sessionToken, session.expiresAt)
+      sendJson(response, path.endsWith('/setup') ? 201 : 200, { csrfToken: session.csrfToken, expiresAt: session.expiresAt })
+      return true
+    }
+
+    if (path === '/api/v1/auth/logout') {
+      if (method !== 'POST') throw new ApiRequestError(405, 'method_not_allowed', `Method ${method} is not allowed`)
+      assertSameOrigin(request)
+      const token = readCookie(request, PARENT_SESSION_COOKIE)
+      auth!.requireParentMutation(token, readHeader(request, CSRF_HEADER))
+      auth!.logout(token)
+      clearParentSessionCookie(response, request)
+      response.writeHead(204)
+      response.end()
+      return true
+    }
+
+    if (path === '/api/v1/auth/pin') {
+      if (method !== 'PUT') throw new ApiRequestError(405, 'method_not_allowed', `Method ${method} is not allowed`)
+      assertSameOrigin(request)
+      const { newPin } = await readJsonBody(request, changePinRequestSchema)
+      auth!.changePin(readCookie(request, PARENT_SESSION_COOKIE), readHeader(request, CSRF_HEADER), newPin)
+      clearParentSessionCookie(response, request)
+      response.writeHead(204)
+      response.end()
+      return true
+    }
+
+    if (path === '/api/v1/household/settings') {
+      if (dependencies.settings === undefined) throw new ApiRequestError(503, 'service_unavailable', 'Household settings are unavailable')
+      if (method === 'GET') { requireParentRead(auth, request); sendJson(response, 200, dependencies.settings.get()); return true }
+      if (method === 'PATCH') { requireParentMutation(auth, request); const input = await readJsonBody(request, updateHouseholdSettingsRequestSchema); sendJson(response, 200, dependencies.settings.setWeather(input.weather)); return true }
+      throw new ApiRequestError(405, 'method_not_allowed', `Method ${method} is not allowed`)
+    }
+    if (path === '/api/v1/weather/locations') {
+      if (method !== 'GET') throw new ApiRequestError(405, 'method_not_allowed', `Method ${method} is not allowed`)
+      requireParentRead(auth, request)
+      sendJson(response, 200, { locations: await searchWeatherLocations(url.searchParams.get('q') ?? '') })
+      return true
+    }
+
+    if (path === '/api/v1/people') {
+      if (dependencies.people === undefined) throw new ApiRequestError(503, 'service_unavailable', 'People service is unavailable')
+      if (method === 'GET') {
+        requireParentRead(auth, request)
+        sendJson(response, 200, { people: dependencies.people.list() })
+        return true
+      }
+      if (method === 'POST') {
+        requireParentMutation(auth, request)
+        sendJson(response, 201, dependencies.people.create(await readJsonBody(request, createPersonRequestSchema)))
+        return true
+      }
+      throw new ApiRequestError(405, 'method_not_allowed', `Method ${method} is not allowed`)
+    }
+
+    const personMatch = /^\/api\/v1\/people\/([^/]+)$/.exec(path)
+    if (personMatch !== null) {
+      if (dependencies.people === undefined) throw new ApiRequestError(503, 'service_unavailable', 'People service is unavailable')
+      const id = decodeURIComponent(personMatch[1])
+      if (method === 'PATCH') {
+        requireParentMutation(auth, request)
+        sendJson(response, 200, dependencies.people.update({ id, ...await readJsonBody(request, updatePersonRequestSchema) }))
+        return true
+      }
+      if (method === 'DELETE') {
+        requireParentMutation(auth, request)
+        dependencies.people.remove(id)
+        response.writeHead(204)
+        response.end()
+        return true
+      }
+      throw new ApiRequestError(405, 'method_not_allowed', `Method ${method} is not allowed`)
+    }
+
+    if (path === '/api/v1/chores') {
+      if (dependencies.chores === undefined) throw new ApiRequestError(503, 'service_unavailable', 'Chore service is unavailable')
+      if (method === 'GET') { requireParentRead(auth, request); sendJson(response, 200, { chores: dependencies.chores.listChores() }); return true }
+      if (method === 'POST') { requireParentMutation(auth, request); const id = dependencies.chores.createChore(await readJsonBody(request, createChoreRequestSchema)); sendJson(response, 201, dependencies.chores.listChores().find((chore) => chore.id === id)!); return true }
+      throw new ApiRequestError(405, 'method_not_allowed', `Method ${method} is not allowed`)
+    }
+    if (path === '/api/v1/icons/search') {
+      if (method !== 'GET') throw new ApiRequestError(405, 'method_not_allowed', `Method ${method} is not allowed`)
+      requireParentRead(auth, request)
+      if (dependencies.icons === undefined) throw new ApiRequestError(503, 'service_unavailable', 'Online icon search is unavailable')
+      const query = url.searchParams.get('query')?.trim() ?? ''
+      if (query.length < 2 || query.length > 80) throw new ApiRequestError(400, 'bad_request', 'Enter at least two characters to search icons')
+      try { sendJson(response, 200, { icons: await dependencies.icons.search(query) }) } catch { throw new ApiRequestError(503, 'service_unavailable', 'Icon search is temporarily unavailable') }
+      return true
+    }
+    if (path === '/api/v1/icons/import') {
+      if (method !== 'POST') throw new ApiRequestError(405, 'method_not_allowed', `Method ${method} is not allowed`)
+      requireParentMutation(auth, request)
+      if (dependencies.icons === undefined) throw new ApiRequestError(503, 'service_unavailable', 'Online icon search is unavailable')
+      const { name, color } = await readJsonBody(request, z.object({ name: z.string().min(1).max(140), color: z.string().regex(/^#[0-9a-fA-F]{6}$/).optional() }).strict())
+      try { sendJson(response, 200, { icon: await dependencies.icons.import(name, color) }) } catch { throw new ApiRequestError(400, 'bad_request', 'That icon could not be imported') }
+      return true
+    }
+    const choreMatch = /^\/api\/v1\/chores\/([^/]+)$/.exec(path)
+    if (choreMatch !== null) {
+      if (dependencies.chores === undefined) throw new ApiRequestError(503, 'service_unavailable', 'Chore service is unavailable')
+      const id = decodeURIComponent(choreMatch[1])
+      if (method === 'PATCH') { requireParentMutation(auth, request); sendJson(response, 200, dependencies.chores.updateChore({ id, ...await readJsonBody(request, updateChoreRequestSchema) })); return true }
+      if (method === 'DELETE') { requireParentMutation(auth, request); dependencies.chores.archiveChore(id); response.writeHead(204); response.end(); return true }
+      throw new ApiRequestError(405, 'method_not_allowed', `Method ${method} is not allowed`)
+    }
+    const correctionMatch = /^\/api\/v1\/chores\/([^/]+)\/completion$/.exec(path)
+    if (correctionMatch !== null) {
+      if (dependencies.chores === undefined) throw new ApiRequestError(503, 'service_unavailable', 'Chore service is unavailable')
+      requireParentMutation(auth, request)
+      const { dueDate } = await readJsonBody(request, choreCorrectionRequestSchema)
+      const command = { choreId: decodeURIComponent(correctionMatch[1]), dueDate, actor: 'parent' as const }
+      sendJson(response, 200, method === 'POST' ? dependencies.chores.complete(command) : method === 'DELETE' ? dependencies.chores.undo(command) : (() => { throw new ApiRequestError(405, 'method_not_allowed', `Method ${method} is not allowed`) })())
+      return true
+    }
+    if (path === '/api/v1/stars/adjustments') {
+      if (dependencies.chores === undefined) throw new ApiRequestError(503, 'service_unavailable', 'Chore service is unavailable')
+      if (method !== 'POST') throw new ApiRequestError(405, 'method_not_allowed', `Method ${method} is not allowed`)
+      requireParentMutation(auth, request); const input = await readJsonBody(request, starAdjustmentRequestSchema); sendJson(response, 200, { balance: dependencies.chores.adjustStars(input) }); return true
+    }
+    if (path === '/api/v1/rewards') {
+      if (dependencies.chores === undefined) throw new ApiRequestError(503, 'service_unavailable', 'Reward service is unavailable')
+      if (method === 'GET') { requireParentRead(auth, request); sendJson(response, 200, { rewards: dependencies.chores.listRewards() }); return true }
+      if (method === 'POST') { requireParentMutation(auth, request); const id = dependencies.chores.createReward(await readJsonBody(request, createRewardRequestSchema)); sendJson(response, 201, dependencies.chores.listRewards().find((reward) => reward.id === id)!); return true }
+      throw new ApiRequestError(405, 'method_not_allowed', `Method ${method} is not allowed`)
+    }
+    const rewardMatch = /^\/api\/v1\/rewards\/([^/]+)(?:\/(redeem))?$/.exec(path)
+    if (rewardMatch !== null) {
+      if (dependencies.chores === undefined) throw new ApiRequestError(503, 'service_unavailable', 'Reward service is unavailable')
+      const id = decodeURIComponent(rewardMatch[1]); const action = rewardMatch[2]
+      if (action === 'redeem' && method === 'POST') { requireParentMutation(auth, request); const { personId } = await readJsonBody(request, redeemRewardRequestSchema); sendJson(response, 201, { id: dependencies.chores.redeem(id, personId) }); return true }
+      if (!action && method === 'PATCH') { requireParentMutation(auth, request); sendJson(response, 200, dependencies.chores.updateReward({ id, ...await readJsonBody(request, updateRewardRequestSchema) })); return true }
+      if (!action && method === 'DELETE') { requireParentMutation(auth, request); dependencies.chores.archiveReward(id); response.writeHead(204); response.end(); return true }
+      throw new ApiRequestError(405, 'method_not_allowed', `Method ${method} is not allowed`)
+    }
+    if (path === '/api/v1/reward-redemptions') {
+      if (dependencies.chores === undefined) throw new ApiRequestError(503, 'service_unavailable', 'Reward service is unavailable')
+      if (method !== 'GET') throw new ApiRequestError(405, 'method_not_allowed', `Method ${method} is not allowed`)
+      requireParentRead(auth, request); sendJson(response, 200, { redemptions: dependencies.chores.listRedemptions() }); return true
+    }
+    const grantMatch = /^\/api\/v1\/reward-redemptions\/([^/]+)\/grant$/.exec(path)
+    if (grantMatch !== null) {
+      if (dependencies.chores === undefined) throw new ApiRequestError(503, 'service_unavailable', 'Reward service is unavailable')
+      if (method !== 'POST') throw new ApiRequestError(405, 'method_not_allowed', `Method ${method} is not allowed`)
+      requireParentMutation(auth, request); dependencies.chores.grantRedemption(decodeURIComponent(grantMatch[1])); response.writeHead(204); response.end(); return true
+    }
+
+    if (path === '/api/v1/lists') {
+      if (dependencies.lists === undefined) throw new ApiRequestError(503, 'service_unavailable', 'List service is unavailable')
+      if (method === 'GET') { requireParentRead(auth, request); sendJson(response, 200, { lists: dependencies.lists.queries.getAll() }); return true }
+      if (method === 'POST') {
+        requireParentMutation(auth, request)
+        const list = dependencies.lists.parentCommands.create(await readJsonBody(request, createListRequestSchema))
+        publishInvalidation(dependencies, ['lists'])
+        sendJson(response, 201, list)
+        return true
+      }
+      throw new ApiRequestError(405, 'method_not_allowed', `Method ${method} is not allowed`)
+    }
+    const listItemsMatch = /^\/api\/v1\/lists\/([^/]+)\/items(?:\/(checked))?$/.exec(path)
+    if (listItemsMatch !== null) {
+      if (dependencies.lists === undefined) throw new ApiRequestError(503, 'service_unavailable', 'List service is unavailable')
+      const listId = decodeURIComponent(listItemsMatch[1]); const action = listItemsMatch[2]
+      if (action === undefined && method === 'POST') {
+        requireParentMutation(auth, request)
+        const item = dependencies.lists.parentCommands.addItem(listId, (await readJsonBody(request, addListItemRequestSchema)).text)
+        publishInvalidation(dependencies, ['lists'])
+        sendJson(response, 201, item)
+        return true
+      }
+      if (action === 'checked' && method === 'DELETE') {
+        requireParentMutation(auth, request); dependencies.lists.parentCommands.clearChecked(listId); publishInvalidation(dependencies, ['lists']); response.writeHead(204); response.end(); return true
+      }
+      throw new ApiRequestError(405, 'method_not_allowed', `Method ${method} is not allowed`)
+    }
+    const listMatch = /^\/api\/v1\/lists\/([^/]+)$/.exec(path)
+    if (listMatch !== null) {
+      if (dependencies.lists === undefined) throw new ApiRequestError(503, 'service_unavailable', 'List service is unavailable')
+      const id = decodeURIComponent(listMatch[1])
+      if (method === 'PATCH') { requireParentMutation(auth, request); const list = dependencies.lists.parentCommands.update({ id, ...await readJsonBody(request, updateListRequestSchema) }); publishInvalidation(dependencies, ['lists']); sendJson(response, 200, list); return true }
+      if (method === 'DELETE') { requireParentMutation(auth, request); dependencies.lists.parentCommands.remove(id); publishInvalidation(dependencies, ['lists']); response.writeHead(204); response.end(); return true }
+      throw new ApiRequestError(405, 'method_not_allowed', `Method ${method} is not allowed`)
+    }
+    const listItemMatch = /^\/api\/v1\/list-items\/([^/]+)(?:\/(toggle))?$/.exec(path)
+    if (listItemMatch !== null) {
+      if (dependencies.lists === undefined) throw new ApiRequestError(503, 'service_unavailable', 'List service is unavailable')
+      const id = decodeURIComponent(listItemMatch[1]); const action = listItemMatch[2]
+      if (action === 'toggle' && method === 'POST') { requireParentMutation(auth, request); dependencies.lists.parentCommands.toggleItem(id); publishInvalidation(dependencies, ['lists']); response.writeHead(204); response.end(); return true }
+      if (action === undefined && method === 'DELETE') { requireParentMutation(auth, request); dependencies.lists.parentCommands.removeItem(id); publishInvalidation(dependencies, ['lists']); response.writeHead(204); response.end(); return true }
+      throw new ApiRequestError(405, 'method_not_allowed', `Method ${method} is not allowed`)
+    }
+
+    if (path === '/api/v1/meals') {
+      if (dependencies.meals === undefined) throw new ApiRequestError(503, 'service_unavailable', 'Meal service is unavailable')
+      if (method !== 'GET') throw new ApiRequestError(405, 'method_not_allowed', `Method ${method} is not allowed`)
+      requireParentRead(auth, request)
+      const { start, end } = validateApiInput(Object.fromEntries(url.searchParams), mealRangeRequestSchema)
+      sendJson(response, 200, { meals: dependencies.meals.queries.getRange(start, end) })
+      return true
+    }
+    if (path === '/api/v1/meal-templates') {
+      if (dependencies.meals === undefined) throw new ApiRequestError(503, 'service_unavailable', 'Meal service is unavailable')
+      if (method !== 'GET') throw new ApiRequestError(405, 'method_not_allowed', `Method ${method} is not allowed`)
+      requireParentRead(auth, request); sendJson(response, 200, { templates: dependencies.meals.queries.getTemplates() }); return true
+    }
+    const mealTemplateMatch = /^\/api\/v1\/meal-templates\/([1-7])\/(breakfast|lunch|dinner)$/.exec(path)
+    if (mealTemplateMatch !== null) {
+      if (dependencies.meals === undefined) throw new ApiRequestError(503, 'service_unavailable', 'Meal service is unavailable')
+      if (method !== 'PUT') throw new ApiRequestError(405, 'method_not_allowed', `Method ${method} is not allowed`)
+      requireParentMutation(auth, request); dependencies.meals.parentCommands.setTemplate(Number(mealTemplateMatch[1]), mealSlotKindSchema.parse(mealTemplateMatch[2]), (await readJsonBody(request, setMealTemplateRequestSchema)).text); response.writeHead(204); response.end(); return true
+    }
+    const mealMatch = /^\/api\/v1\/meals\/(\d{4}-\d{2}-\d{2})\/(breakfast|lunch|dinner)$/.exec(path)
+    if (mealMatch !== null) {
+      if (dependencies.meals === undefined) throw new ApiRequestError(503, 'service_unavailable', 'Meal service is unavailable')
+      if (method !== 'PUT') throw new ApiRequestError(405, 'method_not_allowed', `Method ${method} is not allowed`)
+      requireParentMutation(auth, request)
+      const date = mealMatch[1]; const slot = mealSlotKindSchema.parse(mealMatch[2]); const { text } = await readJsonBody(request, setMealRequestSchema)
+      dependencies.meals.parentCommands.set(date, slot, text)
+      publishInvalidation(dependencies, ['meals'])
+      response.writeHead(204); response.end(); return true
+    }
+
+    if (path === '/api/v1/google/configuration') {
+      if (dependencies.googleConfiguration === undefined) throw new ApiRequestError(503, 'service_unavailable', 'Google configuration is unavailable')
+      if (method === 'GET') { requireParentRead(auth, request); sendJson(response, 200, dependencies.googleConfiguration.status()); return true }
+      if (method === 'PUT') { requireParentMutation(auth, request); sendJson(response, 201, dependencies.googleConfiguration.configure(await readJsonBody(request, configureGoogleRequestSchema))); return true }
+      throw new ApiRequestError(405, 'method_not_allowed', `Method ${method} is not allowed`)
+    }
+    const google = dependencies.google ?? dependencies.googleConfiguration?.get()
+    if (path === '/api/v1/google/accounts') {
+      if (google === undefined) throw new ApiRequestError(503, 'service_unavailable', 'Google Calendar is not configured or its vault is locked')
+      if (method !== 'GET') throw new ApiRequestError(405, 'method_not_allowed', `Method ${method} is not allowed`)
+      requireParentRead(auth, request)
+      sendJson(response, 200, { accounts: google.listAccounts() })
+      return true
+    }
+
+    if (path === '/api/v1/google/connect') {
+      if (google === undefined) throw new ApiRequestError(503, 'service_unavailable', 'Google Calendar is not configured or its vault is locked')
+      if (method !== 'POST') throw new ApiRequestError(405, 'method_not_allowed', `Method ${method} is not allowed`)
+      requireParentMutation(auth, request)
+      const sessionToken = readCookie(request, PARENT_SESSION_COOKIE)!
+      sendJson(response, 201, google.startConnection(sessionToken))
+      return true
+    }
+
+    if (path === '/api/v1/google/sync') {
+      if (method !== 'POST') throw new ApiRequestError(405, 'method_not_allowed', `Method ${method} is not allowed`)
+      requireParentMutation(auth, request)
+      if (dependencies.googleSyncScheduler === undefined) throw new ApiRequestError(503, 'service_unavailable', 'Google calendar synchronization is unavailable')
+      void dependencies.googleSyncScheduler.syncNow('manual')
+      response.writeHead(202)
+      response.end()
+      return true
+    }
+
+    if (path === '/api/v1/google/callback') {
+      if (google === undefined) throw new ApiRequestError(503, 'service_unavailable', 'Google Calendar is not configured or its vault is locked')
+      if (method !== 'GET') throw new ApiRequestError(405, 'method_not_allowed', `Method ${method} is not allowed`)
+      const sessionToken = readCookie(request, PARENT_SESSION_COOKIE)
+      requireParentRead(auth, request)
+      const code = url.searchParams.get('code')
+      const state = url.searchParams.get('state')
+      if (!code || !state) throw new ApiRequestError(400, 'bad_request', 'Google authorization response is incomplete')
+      await google.completeConnection({ parentSessionId: sessionToken!, state, code })
+      response.writeHead(302, { location: '/admin/?google=connected' })
+      response.end()
+      return true
+    }
+
+    const googleAccountMatch = /^\/api\/v1\/google\/accounts\/([^/]+)(?:\/(calendars))?$/.exec(path)
+    if (googleAccountMatch !== null) {
+      if (google === undefined) throw new ApiRequestError(503, 'service_unavailable', 'Google Calendar is not configured or its vault is locked')
+      const accountId = decodeURIComponent(googleAccountMatch[1])
+      const calendars = googleAccountMatch[2] === 'calendars'
+      if (calendars && method === 'GET') {
+        requireParentRead(auth, request)
+        sendJson(response, 200, { calendars: await google.listRemoteCalendars(accountId) })
+        return true
+      }
+      if (calendars && method === 'PUT') {
+        requireParentMutation(auth, request)
+        const input = await readJsonBody(request, setCalendarSelectionRequestSchema)
+        google.setCalendarSelection({ accountId, ...input })
+        if (input.selected) void dependencies.googleSyncScheduler?.syncNow('selection')
+        response.writeHead(204)
+        response.end()
+        return true
+      }
+      if (!calendars && method === 'DELETE') {
+        requireParentMutation(auth, request)
+        sendJson(response, 200, await google.disconnect(accountId))
+        return true
+      }
+      throw new ApiRequestError(405, 'method_not_allowed', `Method ${method} is not allowed`)
+    }
+
+    if (path === '/api/v1/displays') {
+      if (method === 'GET') {
+        requireParentRead(auth, request)
+        if (displays === undefined) throw new ApiRequestError(503, 'service_unavailable', 'Display service is unavailable')
+        sendJson(response, 200, { displays: displays.list() })
+        return true
+      }
+      if (method === 'POST') {
+        requireParentMutation(auth, request)
+        if (displays === undefined) throw new ApiRequestError(503, 'service_unavailable', 'Display service is unavailable')
+        const input = await readJsonBody(request, registerDisplayRequestSchema)
+        // The credential is intentionally present only in this parent-approved response.
+        sendJson(response, 201, displays.register(input))
+        return true
+      }
+      throw new ApiRequestError(405, 'method_not_allowed', `Method ${method} is not allowed`)
+    }
+
+    const displayMatch = /^\/api\/v1\/displays\/([^/]+)(?:\/(revoke))?$/.exec(path)
+    if (displayMatch !== null) {
+      const [, displayId, action] = displayMatch
+      if (action === 'revoke') {
+        if (method !== 'POST') throw new ApiRequestError(405, 'method_not_allowed', `Method ${method} is not allowed`)
+        requireParentMutation(auth, request)
+        if (displays === undefined) throw new ApiRequestError(503, 'service_unavailable', 'Display service is unavailable')
+        displays.revoke(displayId)
+        response.writeHead(204)
+        response.end()
+        return true
+      }
+      if (method !== 'PATCH') throw new ApiRequestError(405, 'method_not_allowed', `Method ${method} is not allowed`)
+      requireParentMutation(auth, request)
+      if (displays === undefined) throw new ApiRequestError(503, 'service_unavailable', 'Display service is unavailable')
+      sendJson(response, 200, displays.update(displayId, await readJsonBody(request, updateDisplayRequestSchema)))
+      return true
+    }
+
+    if (path === '/api/v1/display/session') {
+      if (method !== 'GET') throw new ApiRequestError(405, 'method_not_allowed', `Method ${method} is not allowed`)
+      if (displays === undefined) throw new ApiRequestError(503, 'service_unavailable', 'Display service is unavailable')
+      const device = displays.authenticate(readBearerToken(request))
+      if (device === undefined) throw new AuthError(401, 'unauthorized', 'A registered display credential is required')
+      sendJson(response, 200, { display: device })
+      return true
+    }
+
+    const displayChoreMatch = /^\/api\/v1\/display\/chores\/([^/]+)\/completion$/.exec(path)
+    if (displayChoreMatch !== null) {
+      if (method !== 'POST' && method !== 'DELETE') throw new ApiRequestError(405, 'method_not_allowed', `Method ${method} is not allowed`)
+      if (displays === undefined || dependencies.chores === undefined || dependencies.settings === undefined) {
+        throw new ApiRequestError(503, 'service_unavailable', 'Display chore service is unavailable')
+      }
+      const device = displays.authenticate(readBearerToken(request))
+      if (device === undefined) throw new AuthError(401, 'unauthorized', 'A registered display credential is required')
+      const { dueDate } = await readJsonBody(request, displayChoreCommandRequestSchema)
+      const householdDate = currentHouseholdDate(dependencies.settings, dependencies.now)
+      const command = {
+        choreId: decodeURIComponent(displayChoreMatch[1]),
+        dueDate,
+        actor: 'display' as const,
+        authorizedDate: householdDate,
+        initiatingDeviceId: device.id
+      }
+      const result = method === 'POST' ? dependencies.chores.complete(command) : dependencies.chores.undo(command)
+      sendJson(response, 200, result)
+      return true
+    }
+
+    if (path === apiContract.events.path) {
+      if (method !== apiContract.events.method) {
+        throw new ApiRequestError(405, 'method_not_allowed', `Method ${method} is not allowed`)
+      }
+      const principal = dependencies.eventStreamAuthenticator?.authenticate(request)
+      if (principal === undefined) {
+        throw new ApiRequestError(401, 'unauthorized', 'Authentication is required for the event stream')
+      }
+      if (dependencies.eventStream === undefined) {
+        throw new ApiRequestError(503, 'internal_error', 'Event stream is unavailable')
+      }
+      const lastEventId = request.headers['last-event-id']
+      dependencies.eventStream.connect(response, typeof lastEventId === 'string' ? lastEventId : undefined)
+      return true
+    }
+
+    if (path === apiContract.info.path) {
+      if (method !== apiContract.info.method) {
+        throw new ApiRequestError(405, 'method_not_allowed', `Method ${method} is not allowed`)
+      }
+      validateApiInput(Object.fromEntries(url.searchParams), apiContract.info.request)
+      sendJson(response, 200, apiInfoResponseSchema.parse({ version: 'v1' }))
+      return true
+    }
+
+    throw new ApiRequestError(404, 'not_found', 'API route was not found')
+  } catch (error) {
+    if (error instanceof ApiRequestError) {
+      sendApiError(response, error)
+      return true
+    }
+    if (error instanceof AuthError) {
+      if (error.retryAfterSeconds !== undefined) response.setHeader('retry-after', String(error.retryAfterSeconds))
+      sendApiError(response, new ApiRequestError(error.status, error.code, error.message))
+      return true
+    }
+    if (error instanceof Error) {
+      // Domain validation errors intentionally do not expose storage internals.
+      sendApiError(response, new ApiRequestError(400, 'bad_request', error.message))
+      return true
+    }
+    sendApiError(response, new ApiRequestError(500, 'internal_error', 'Unexpected server error'))
+    return true
+  }
+}
+
+/**
+ * Temporary compatibility boundary for the protected kiosk renderer.  The
+ * whitelist is deliberately read-only except A04's already-authorized today
+ * chore completion/undo commands; every other legacy IPC mutation is refused.
+ */
+async function handleDisplayReadRpc(
+  channel: string,
+  request: IncomingMessage,
+  device: ReturnType<DisplayDeviceService['authenticate']> & object,
+  dependencies: Required<Pick<ApiRouterDependencies, 'auth' | 'displays' | 'displayRead' | 'people' | 'lists' | 'meals' | 'chores' | 'settings'>> & ApiRouterDependencies
+): Promise<unknown> {
+  const read = dependencies.displayRead
+  switch (channel) {
+    case 'app:getInfo': return { version: process.env.OSL_RELEASE_VERSION ?? '0.8.0', platform: 'browser', zone: dependencies.settings.get().timezone }
+    case 'settings:getAll': return read.settings(device)
+    case 'settings:set': {
+      if ((displayLayoutEditUntil.get(device.id) ?? 0) < Date.now()) throw new AuthError(403, 'forbidden', 'Enter the parent PIN before changing this display layout')
+      const input = await readJsonBody(request, z.object({ patch: z.object({ homeLayout: z.unknown() }).strict() }).strict())
+      const updated = dependencies.displays.update(device.id, { homeLayout: input.patch.homeLayout })
+      return read.settings(updated)
+    }
+    case 'people:list': return dependencies.people.list()
+    case 'calendars:list': return read.calendars()
+    case 'events:getOccurrences': {
+      const input = await readJsonBody(request, z.object({ start: z.string(), end: z.string() }).strict())
+      return read.occurrences(input)
+    }
+    case 'chores:list': return read.choreDefinitions()
+    case 'chores:getDay': {
+      const input = await readJsonBody(request, z.object({ date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/) }).strict())
+      return read.choresForDay(input.date)
+    }
+    case 'stars:balances': return read.balances()
+    case 'rewards:list': return read.rewards()
+    case 'lists:getAll': return dependencies.lists.queries.getAll()
+    case 'meals:getRange': {
+      const input = await readJsonBody(request, z.object({ start: z.string().regex(/^\d{4}-\d{2}-\d{2}$/), end: z.string().regex(/^\d{4}-\d{2}-\d{2}$/) }).strict())
+      return dependencies.meals.queries.getRange(input.start, input.end)
+    }
+    case 'weather:get': return fetchWeather(dependencies.settings.get().weather)
+    case 'screensaver:listPhotos': return []
+    case 'auth:getStatus': return { pinSet: true, unlocked: (displayLayoutEditUntil.get(device.id) ?? 0) >= Date.now() }
+    case 'auth:verifyPin': {
+      const { pin } = await readJsonBody(request, pinRequestSchema)
+      try { const session = dependencies.auth.login(pin); dependencies.auth.logout(session.sessionToken); displayLayoutEditUntil.set(device.id, Date.now() + 10 * 60_000); return { valid: true } }
+      catch (error) { if (error instanceof AuthError && error.status === 401) return { valid: false }; throw error }
+    }
+    case 'auth:lock': displayLayoutEditUntil.delete(device.id); return undefined
+    case 'sync:getStatus': return { state: 'idle', lastError: null, calendars: [] }
+    case 'chores:complete': return displayRpcChoreCommand(request, device.id, dependencies, 'complete')
+    case 'chores:uncomplete': return displayRpcChoreCommand(request, device.id, dependencies, 'undo')
+    default: throw new AuthError(403, 'forbidden', 'This display capability is read-only')
+  }
+}
+
+const displayLayoutEditUntil = new Map<string, number>()
+
+async function displayRpcChoreCommand(
+  request: IncomingMessage,
+  deviceId: string,
+  dependencies: Required<Pick<ApiRouterDependencies, 'chores' | 'settings'>> & ApiRouterDependencies,
+  operation: 'complete' | 'undo'
+): Promise<{ balance: number }> {
+  const input = await readJsonBody(request, z.object({ choreId: z.string().min(1), date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/) }).strict())
+  const result = dependencies.chores[operation]({
+    choreId: input.choreId, dueDate: input.date, actor: 'display', authorizedDate: currentHouseholdDate(dependencies.settings, dependencies.now), initiatingDeviceId: deviceId
+  })
+  return { balance: result.balance }
+}
+
+type WeatherSnapshot = { temperature: number; code: number; isDay: boolean; description: string; windSpeed: number; unit: 'f' | 'c'; label: string; daily: { date: string; code: number; high: number; low: number; precipProb: number | null }[]; fetchedAt: string }
+const weatherCache = new Map<string, { expiresAt: number; value: WeatherSnapshot }>()
+async function fetchWeather(location: { lat: number; lon: number; label: string } | null): Promise<WeatherSnapshot | null> {
+  if (location === null) return null
+  const key = `${location.lat},${location.lon}`; const cached = weatherCache.get(key)
+  if (cached && cached.expiresAt > Date.now()) return { ...cached.value, label: location.label }
+  const params = new URLSearchParams({ latitude: String(location.lat), longitude: String(location.lon), current: 'temperature_2m,weather_code,is_day,wind_speed_10m', daily: 'weather_code,temperature_2m_max,temperature_2m_min,precipitation_probability_max', timezone: 'auto', forecast_days: '7' })
+  try {
+    const response = await fetch(`https://api.open-meteo.com/v1/forecast?${params}`)
+    if (!response.ok) return cached?.value ?? null
+    const data = await response.json() as { current?: { temperature_2m?: number; weather_code?: number; is_day?: number; wind_speed_10m?: number }; daily?: { time?: string[]; weather_code?: number[]; temperature_2m_max?: number[]; temperature_2m_min?: number[]; precipitation_probability_max?: Array<number | null> } }
+    if (data.current?.temperature_2m === undefined || data.current.weather_code === undefined || data.current.is_day === undefined || !data.daily?.time) return cached?.value ?? null
+    const windSpeed = Math.round(data.current.wind_speed_10m ?? 0)
+    const value: WeatherSnapshot = { temperature: Math.round(data.current.temperature_2m), code: data.current.weather_code, isDay: data.current.is_day === 1, description: weatherDescription(data.current.weather_code, windSpeed), windSpeed, unit: 'c', label: location.label, fetchedAt: new Date().toISOString(), daily: data.daily.time.map((date, index) => ({ date, code: data.daily!.weather_code?.[index] ?? 0, high: Math.round(data.daily!.temperature_2m_max?.[index] ?? 0), low: Math.round(data.daily!.temperature_2m_min?.[index] ?? 0), precipProb: data.daily!.precipitation_probability_max?.[index] ?? null })) }
+    weatherCache.set(key, { value, expiresAt: Date.now() + 10 * 60_000 })
+    return value
+  } catch { return cached?.value ?? null }
+}
+
+function weatherDescription(code: number, windSpeed: number): string {
+  const condition = code === 0 ? 'Clear' : code <= 2 ? 'Partly cloudy' : code === 3 ? 'Overcast' : code === 45 || code === 48 ? 'Foggy' : code >= 95 ? 'Thunderstorms' : code >= 71 && code <= 86 ? 'Snowy' : code >= 51 && code <= 82 ? 'Rainy' : 'Cloudy'
+  return windSpeed >= 30 ? `${condition} and windy` : condition
+}
+
+async function searchWeatherLocations(query: string): Promise<Array<{ label: string; lat: number; lon: number }>> {
+  const normalized = query.trim(); if (normalized.length < 2) return []
+  const params = new URLSearchParams({ name: normalized, count: '8', language: 'en', format: 'json' })
+  try {
+    const response = await fetch(`https://geocoding-api.open-meteo.com/v1/search?${params}`); if (!response.ok) return []
+    const data = await response.json() as { results?: Array<{ name?: string; latitude?: number; longitude?: number; admin1?: string; country?: string }> }
+    return (data.results ?? []).filter((item) => item.name && item.latitude !== undefined && item.longitude !== undefined).map((item) => ({ label: [item.name, item.admin1, item.country].filter(Boolean).join(', '), lat: item.latitude!, lon: item.longitude! }))
+  } catch { return [] }
+}
+
+function currentHouseholdDate(settings: HouseholdSettingsService, now: (() => Date) | undefined): string {
+  const date = DateTime.fromJSDate((now ?? (() => new Date()))()).setZone(settings.get().timezone).toISODate()
+  if (date === null) throw new ApiRequestError(500, 'internal_error', 'Unable to determine household date')
+  return date
+}
+
+function readHeader(request: IncomingMessage, name: string): string | undefined {
+  const value = request.headers[name]
+  return Array.isArray(value) ? value[0] : value
+}
+
+function readCookie(request: IncomingMessage, name: string): string | undefined {
+  const header = readHeader(request, 'cookie')
+  if (header === undefined) return undefined
+  return header.split(';').map((part) => part.trim()).find((part) => part.startsWith(`${name}=`))?.slice(name.length + 1)
+}
+
+function assertSameOrigin(request: IncomingMessage): void {
+  const origin = readHeader(request, 'origin')
+  const host = readHeader(request, 'host')
+  if (origin === undefined || host === undefined) throw new AuthError(403, 'forbidden', 'A same-origin request is required')
+  const protocol = readHeader(request, 'x-forwarded-proto') === 'https' ? 'https' : 'http'
+  if (origin !== `${protocol}://${host}`) throw new AuthError(403, 'forbidden', 'Request origin is not allowed')
+}
+
+function requireParentRead(auth: HouseholdAuthService | undefined, request: IncomingMessage): void {
+  if (auth === undefined || auth.getParentSession(readCookie(request, PARENT_SESSION_COOKIE)) === undefined) {
+    throw new AuthError(401, 'unauthorized', 'Parent session is required')
+  }
+}
+
+function requireParentMutation(auth: HouseholdAuthService | undefined, request: IncomingMessage): void {
+  assertSameOrigin(request)
+  if (auth === undefined) throw new ApiRequestError(503, 'service_unavailable', 'Authentication service is unavailable')
+  auth.requireParentMutation(readCookie(request, PARENT_SESSION_COOKIE), readHeader(request, CSRF_HEADER))
+}
+
+function publishInvalidation(dependencies: ApiRouterDependencies, resources: string[]): void {
+  dependencies.eventStream?.publish({ type: 'query.invalidated', data: { resources } })
+}
+
+function readBearerToken(request: IncomingMessage): string | undefined {
+  const authorization = readHeader(request, 'authorization')
+  return authorization?.match(/^Bearer ([A-Za-z0-9_-]{32,})$/)?.[1]
+}
+
+function setParentSessionCookie(response: ServerResponse, request: IncomingMessage, token: string, expiresAt: string): void {
+  const secure = readHeader(request, 'x-forwarded-proto') === 'https' ? '; Secure' : ''
+  // Lax keeps the cookie off cross-site subrequests and POSTs, while allowing
+  // Google's top-level GET redirect to return to the OAuth callback with the
+  // parent session that initiated the state-bound PKCE flow.
+  response.setHeader('set-cookie', `${PARENT_SESSION_COOKIE}=${token}; Path=/api/v1; HttpOnly; SameSite=Lax${secure}; Expires=${new Date(expiresAt).toUTCString()}`)
+}
+
+function clearParentSessionCookie(response: ServerResponse, request: IncomingMessage): void {
+  const secure = readHeader(request, 'x-forwarded-proto') === 'https' ? '; Secure' : ''
+  response.setHeader('set-cookie', `${PARENT_SESSION_COOKIE}=; Path=/api/v1; HttpOnly; SameSite=Lax${secure}; Max-Age=0`)
+}

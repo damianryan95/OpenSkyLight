@@ -7,10 +7,7 @@ import type {
   ChoreDto,
   ChoreUpdateInput,
   DayChoreDto,
-  EventCreateInput,
-  EventDeleteInput,
   EventDto,
-  EventUpdateInput,
   ListDto,
   ListItemDto,
   ListKind,
@@ -49,9 +46,6 @@ export type IpcContract = {
 
   'events:getOccurrences': { req: { start: string; end: string }; res: OccurrenceDto[] }
   'events:get': { req: { id: string }; res: EventDto | null }
-  'events:create': { req: EventCreateInput; res: EventDto }
-  'events:update': { req: EventUpdateInput; res: void }
-  'events:delete': { req: EventDeleteInput; res: void }
 
   'google:getStatus': {
     req: void
@@ -108,14 +102,6 @@ export type IpcContract = {
   'rewards:redemptions': { req: void; res: RedemptionDto[] }
   'rewards:grant': { req: { redemptionId: string }; res: void }
 
-  'camera:list': { req: void; res: { id: string; name: string }[] }
-  'camera:add': { req: { name: string; url: string }; res: { id: string; name: string } }
-  'camera:remove': { req: { cameraId: string }; res: void }
-  /** Start (or join) the stream; returns the playable URL and a per-viewer session id. */
-  'camera:start': { req: { cameraId: string }; res: { wsUrl: string; sessionId: string } }
-  /** Stop must present the session id from start — stale stops can't kill newer streams. */
-  'camera:stop': { req: { sessionId: string }; res: void }
-
   'rss:getFeed': {
     req: { feedId: string }
     res: {
@@ -126,31 +112,14 @@ export type IpcContract = {
     }
   }
 
-  'birdnet:getDetections': {
-    req: { url: string }
-    res: {
-      /** normalized origin the tile should persist */
-      url: string
-      label: string
-      detections: {
-        id: number
-        commonName: string
-        scientificName: string
-        confidence: number
-        timestamp: string
-        /** osl-bird:// proxy URL for the species photo */
-        image: string
-      }[]
-      fetchedAt: string
-    }
-  }
-
   'weather:get': {
     req: void
     res: {
       temperature: number
       code: number
       isDay: boolean
+      description: string
+      windSpeed: number
       unit: 'f' | 'c'
       label: string
       daily: { date: string; code: number; high: number; low: number; precipProb: number | null }[]
@@ -218,9 +187,7 @@ export const ALLOWED_CHANNEL_PREFIXES = [
   'screensaver:',
   'kiosk:',
   'rss:',
-  'camera:',
-  'companion:',
-  'birdnet:'
+  'companion:'
 ] as const
 
 /** Envelope used for every invoke result so errors cross the bridge cleanly. */

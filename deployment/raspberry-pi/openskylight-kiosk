@@ -1,0 +1,39 @@
+#!/bin/sh
+# Launch OpenSkyLight in the supported Raspberry Pi OS X11 session.
+# Configuration belongs in /etc/openskylight-kiosk.env, not in this file.
+set -eu
+
+. /etc/openskylight-kiosk.env
+
+: "${OSL_KIOSK_URL:?OSL_KIOSK_URL must be set in /etc/openskylight-kiosk.env}"
+: "${OSL_CHROMIUM_BIN:=chromium-browser}"
+: "${OSL_HIDE_POINTER:=true}"
+
+# This is deliberately host-owned. The server must never attempt to control
+# DPMS or the compositor on a display device.
+case "${OSL_DPMS:-on}" in
+  on) xset +dpms; xset s on ;;
+  off) xset -dpms; xset s off ;;
+  *) echo "OSL_DPMS must be 'on' or 'off'" >&2; exit 64 ;;
+esac
+
+if [ "$OSL_HIDE_POINTER" = "true" ]; then
+  # unclutter-xfixes hides an idle mouse pointer but leaves touch input intact.
+  unclutter --timeout 1 --jitter 1 --ignore-scrolling &
+fi
+
+# Re-launch Chromium if it crashes or is closed. A normal server/network
+# interruption does not close Chromium; the kiosk client reconnects itself.
+while :; do
+  "$OSL_CHROMIUM_BIN" \
+    --kiosk \
+    --start-fullscreen \
+    --no-first-run \
+    --no-default-browser-check \
+    --disable-session-crashed-bubble \
+    --disable-features=Translate \
+    --overscroll-history-navigation=0 \
+    --disable-pinch \
+    "$OSL_KIOSK_URL" || true
+  sleep 2
+done

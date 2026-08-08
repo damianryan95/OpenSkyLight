@@ -24,6 +24,21 @@ body,
   height: 100%;
 }
 
+:root {
+  /*
+   * The wall display must feel composed on an ultra-wide panel, rather than
+   * simply making every card and control wider.  Keep this on the application
+   * shell (not body) so the linen and light-wash background deliberately fill
+   * the unused viewport space.
+   */
+  --kiosk-content-max-width: 1720px;
+}
+
+.kiosk-app-shell {
+  width: min(100%, var(--kiosk-content-max-width));
+  margin-inline: auto;
+}
+
 body {
   font-family: var(--font-sans);
   background-color: var(--color-paper);

@@ -1,0 +1,7 @@
+[Desktop Entry]
+Type=Application
+Name=OpenSkyLight kiosk
+Comment=Start the household display after the Raspberry Pi desktop session begins
+Exec=/usr/local/bin/openskylight-kiosk
+Terminal=false
+X-GNOME-Autostart-enabled=true

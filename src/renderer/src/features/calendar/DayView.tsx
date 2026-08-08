@@ -5,8 +5,6 @@ import { occurrenceColor } from '../../lib/colors'
 import { EventCard } from './EventCard'
 import { useCalendarData, useViewRange } from './useCalendarData'
 import { DateTime } from 'luxon'
-import { BigButton } from '../../components/ui'
-import { PlusIcon } from '../../components/icons'
 import { MealsDialog, MealStrip, useMealsForRange } from '../meals/Meals'
 
 export function DayView() {
@@ -14,8 +12,6 @@ export function DayView() {
   const { byDay, peopleById, calendarsById } = useCalendarData(range)
   const { data: settings } = useSettings()
   const focusedDate = useUi((s) => s.focusedDate)
-  const openCreate = useUi((s) => s.openCreate)
-  const openEdit = useUi((s) => s.openEdit)
   const timeFormat = settings?.timeFormat ?? '12h'
   const occurrences = byDay.get(focusedDate) ?? []
   const day = DateTime.fromISO(focusedDate, { zone: ZONE })
@@ -46,7 +42,6 @@ export function DayView() {
               color={occurrenceColor(occ, peopleById, calendarsById)}
               timeFormat={timeFormat}
               peopleById={peopleById}
-              onTap={() => openEdit(occ)}
               size="lg"
             />
           </div>
@@ -54,11 +49,6 @@ export function DayView() {
         {occurrences.length === 0 && (
           <div className="animate-rise mt-16 flex flex-col items-center gap-5 text-center">
             <div className="font-display text-3xl text-ink-faint">A clear day</div>
-            <BigButton onClick={() => openCreate(focusedDate)}>
-              <span className="flex items-center gap-2">
-                <PlusIcon size={20} /> Add something
-              </span>
-            </BigButton>
           </div>
         )}
       </div>

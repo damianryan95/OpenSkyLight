@@ -12,8 +12,3 @@ export function occurrenceColor(
   }
   return calendarsById.get(occ.calendarId)?.color ?? '#8a8378'
 }
-
-export function visibleWithFilters(occ: OccurrenceDto, hiddenPeople: string[]): boolean {
-  if (occ.personIds.length === 0) return true
-  return occ.personIds.some((id) => !hiddenPeople.includes(id))
-}

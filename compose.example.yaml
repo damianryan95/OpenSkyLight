@@ -1,0 +1,36 @@
+# Copy to compose.yaml for local household use. Do not expose this service to
+# the public internet; it is for a trusted household LAN or VPN only.
+services:
+  openskylight:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        OSL_VERSION: "${OSL_IMAGE_TAG:-dev}"
+    # Use an immutable release tag in production, e.g. ghcr.io/openskylight/server:0.8.0.
+    image: "openskylight:${OSL_IMAGE_TAG:-dev}"
+    init: true
+    stop_grace_period: 20s
+    ports:
+      # Bind a specific LAN address instead of all interfaces when possible.
+      - "${OSL_LISTEN_ADDRESS:-127.0.0.1}:${OSL_SERVER_PORT:-3000}:3000"
+    environment:
+      OSL_SERVER_HOST: 0.0.0.0
+      OSL_SERVER_PORT: "3000"
+      OSL_DATABASE_PATH: /data/openskylight.db
+      # Set this to the household's IANA timezone, e.g. Australia/Perth.
+      OSL_HOUSEHOLD_TIMEZONE: "${OSL_HOUSEHOLD_TIMEZONE:-Etc/UTC}"
+      # Google OAuth is configured by a parent in /admin/. No secret mounts
+      # are required.
+    volumes:
+      # SQLite WAL requires a local Docker-managed volume, not a network share.
+      - openskylight-data:/data
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3000/health/ready').then((response) => process.exit(response.ok ? 0 : 1)).catch(() => process.exit(1))"]
+      interval: 15s
+      timeout: 3s
+      start_period: 10s
+      retries: 3
+
+volumes:
+  openskylight-data:

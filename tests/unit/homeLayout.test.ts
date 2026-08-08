@@ -49,7 +49,7 @@ describe('findFreeSpot', () => {
   })
   it('finds the hole left by a removed tile', () => {
     const layout = DEFAULT_HOME_LAYOUT.filter((t) => t.type !== 'meals')
-    expect(findFreeSpot(layout, 2, 2)).toEqual({ x: 9, y: 0 })
+    expect(findFreeSpot(layout, 2, 2)).toEqual({ x: 8, y: 3 })
   })
 })
 
@@ -67,6 +67,13 @@ describe('sanitizeLayout', () => {
     const result = sanitizeLayout([{}, 42, 'x', { id: 'z', type: 'nonsense', x: 0, y: 0, w: 2, h: 2 }])
     expect(result).toEqual([])
   })
+  it('drops a stale removed BirdNET tile without disturbing remaining tiles', () => {
+    const result = sanitizeLayout([
+      { id: 'removed-birds', type: 'birdnet', x: 0, y: 0, w: 4, h: 4, config: { birdnetUrl: 'http://birds.test' } },
+      { id: 'clock', type: 'clock', x: 4, y: 0, w: 2, h: 2 }
+    ])
+    expect(result).toEqual([{ id: 'clock', type: 'clock', x: 4, y: 0, w: 2, h: 2 }])
+  })
   it('clamps fractional and out-of-range coords', () => {
     const [tile] = sanitizeLayout([{ id: 'c', type: 'clock', x: 11.7, y: -3, w: 2.2, h: 99 }])
     expect(tile).toMatchObject({ x: 10, y: 0, w: 2, h: 6 })
@@ -76,6 +83,23 @@ describe('sanitizeLayout', () => {
     const [tile] = sanitizeLayout([{ id: 'w', type: 'weekAgenda', x: 0, y: 0, w: 1, h: 1 }])
     expect(tile.w).toBeGreaterThanOrEqual(TILE_SPECS.weekAgenda.minW)
     expect(tile.h).toBeGreaterThanOrEqual(TILE_SPECS.weekAgenda.minH)
+  })
+  it('allows a one-row weather tile and preserves the family chore board size', () => {
+    const result = sanitizeLayout([
+      { id: 'weather', type: 'weather', x: 0, y: 0, w: 2, h: 1 },
+      { id: 'family', type: 'familyChores', x: 2, y: 0, w: 1, h: 1 }
+    ])
+    expect(result[0]).toMatchObject({ type: 'weather', w: 2, h: 1 })
+    expect(result[1].w).toBe(TILE_SPECS.familyChores.minW)
+    expect(result[1].h).toBe(TILE_SPECS.familyChores.minH)
+  })
+  it('allows the compact stars tile and family rewards board', () => {
+    const result = sanitizeLayout([
+      { id: 'stars', type: 'starBalances', x: 0, y: 0, w: 1, h: 1 },
+      { id: 'rewards', type: 'familyRewards', x: 2, y: 0, w: 1, h: 1 }
+    ])
+    expect(result[0]).toMatchObject({ type: 'starBalances', w: 1, h: 1 })
+    expect(result[1]).toMatchObject({ type: 'familyRewards', w: 4, h: 3 })
   })
   it('relocates overlapping tiles deterministically', () => {
     const result = sanitizeLayout([
@@ -98,10 +122,18 @@ describe('sanitizeLayout', () => {
   it('strips config keys a tile type does not declare', () => {
     const result = sanitizeLayout([
       { id: 'c', type: 'clock', x: 0, y: 0, w: 2, h: 2, config: { listId: 'abc' } },
-      { id: 'n', type: 'news', x: 2, y: 0, w: 4, h: 3, config: { feedId: 'npr', cameraId: 'smuggled' } }
+      { id: 'n', type: 'news', x: 2, y: 0, w: 4, h: 3, config: { feedId: 'npr', unrelated: 'smuggled' } }
     ])
     expect(result[0].config).toBeUndefined()
     expect(result[1].config).toEqual({ feedId: 'npr' })
+  })
+
+  it('drops stale camera tiles from saved layouts', () => {
+    const result = sanitizeLayout([
+      { id: 'camera', type: 'camera', x: 0, y: 0, w: 4, h: 3, config: { cameraId: 'old-device' } },
+      { id: 'clock', type: 'clock', x: 4, y: 0, w: 2, h: 2 }
+    ])
+    expect(result).toEqual([{ id: 'clock', type: 'clock', x: 4, y: 0, w: 2, h: 2 }])
   })
 
   it('drops config values and ids the save schema would reject', () => {

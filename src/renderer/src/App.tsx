@@ -3,7 +3,7 @@ import { usePushInvalidation, useSettings } from './api/hooks'
 import { useTheme } from './lib/useTheme'
 import { useUi } from './stores/uiStore'
 import { HomeView } from './features/home/HomeView'
-import { Header, Fab } from './features/shell/Header'
+import { Header } from './features/shell/Header'
 import { Toasts } from './features/shell/Toasts'
 import { UpdateBanner } from './features/shell/UpdateBanner'
 import { WeekView } from './features/calendar/WeekView'
@@ -12,7 +12,6 @@ import { MonthView } from './features/calendar/MonthView'
 import { AgendaView } from './features/calendar/AgendaView'
 import { ChoresView } from './features/chores/ChoresView'
 import { ListsView } from './features/lists/ListsView'
-import { EventEditor } from './features/calendar/EventEditor'
 import { SettingsSheet } from './features/settings/SettingsSheet'
 import { KioskOverlays } from './features/kiosk/KioskOverlays'
 import { OskTray } from './components/Osk'
@@ -36,7 +35,7 @@ export default function App() {
   }, [settings])
 
   return (
-    <div className="flex h-full flex-col">
+    <div className="kiosk-app-shell flex h-full flex-col">
       <Header />
       <main className="min-h-0 flex-1">
         {view === 'home' && <HomeView />}
@@ -47,8 +46,6 @@ export default function App() {
         {view === 'chores' && <ChoresView />}
         {view === 'lists' && <ListsView />}
       </main>
-      {view !== 'chores' && view !== 'lists' && view !== 'home' && <Fab />}
-      <EventEditor />
       <SettingsSheet />
       <OskTray />
       <Toasts />

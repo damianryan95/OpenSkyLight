@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { ipcInvoke } from '../../api/client'
+import { ipcInvoke, subscribePush } from '../../api/client'
 import { XIcon } from '../../components/icons'
 
 /** Shown when a new version has been downloaded; it installs itself at 03:30 anyway. */
@@ -8,7 +8,7 @@ export function UpdateBanner() {
   const [dismissed, setDismissed] = useState(false)
 
   useEffect(() => {
-    return window.osl.on('push:updateReady', (data) => {
+    return subscribePush('push:updateReady', (data) => {
       setVersion((data as { version?: string })?.version ?? null)
       setDismissed(false)
     })

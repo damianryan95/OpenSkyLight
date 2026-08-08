@@ -1,10 +1,12 @@
 import { useEffect, useRef, useState } from 'react'
 import { DateTime } from 'luxon'
 import { useQuery } from '@tanstack/react-query'
-import { ipcInvoke } from '../../api/client'
+import { ipcInvoke, subscribePush } from '../../api/client'
 import { useSettings } from '../../api/hooks'
 import { ZONE } from '../../stores/uiStore'
 import { useKioskState } from '../../stores/kioskStore'
+import { CelebrationOverlayHost } from './CelebrationOverlay'
+import { ConnectivityStatus } from './ConnectivityStatus'
 
 const WAKE_OVERRIDE_MS = 5 * 60 * 1000
 const SLIDE_MS = 12_000
@@ -80,17 +82,17 @@ export function KioskOverlays() {
   const overrideTimer = useRef<number | null>(null)
   const setCovered = useKioskState((s) => s.setCovered)
 
-  // let expensive tiles (camera streams) pause while a layer covers them
+  // Let expensive display work pause while a layer covers it.
   const covered = (sleeping && !awakeOverride) || screensaver
   useEffect(() => {
     setCovered(covered)
   }, [covered, setCovered])
 
   useEffect(() => {
-    const offIdle = window.osl.on('push:kioskIdle', (d) => {
+    const offIdle = subscribePush('push:kioskIdle', (d) => {
       setScreensaver((d as { state?: string })?.state === 'screensaver')
     })
-    const offSleep = window.osl.on('push:sleepState', (d) => {
+    const offSleep = subscribePush('push:sleepState', (d) => {
       const isSleeping = Boolean((d as { sleeping?: boolean })?.sleeping)
       setSleeping(isSleeping)
       if (!isSleeping) {
@@ -117,5 +119,5 @@ export function KioskOverlays() {
     )
   }
   if (screensaver) return <ScreensaverOverlay onDismiss={() => setScreensaver(false)} />
-  return null
+  return <><ConnectivityStatus /><CelebrationOverlayHost /></>
 }

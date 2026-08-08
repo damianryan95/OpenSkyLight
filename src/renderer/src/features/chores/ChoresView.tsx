@@ -4,9 +4,11 @@ import type { DayChoreDto, PersonDto } from '@shared/types'
 import { useBalances, useChoreMutations, useChoresDay, usePeople } from '../../api/hooks'
 import { useUi, ZONE } from '../../stores/uiStore'
 import { initials, isToday, textOn } from '../../lib/format'
+import { peopleInViewingContext } from '@shared/viewingContext'
 import { CheckIcon, MoonIcon, SunIcon } from '../../components/icons'
 import { BigButton } from '../../components/ui'
 import { RewardsDialog } from './RewardsDialog'
+import { isDisplayClient } from '../../lib/clientMode'
 
 function StarBadge({ count }: { count: number }) {
   return (
@@ -110,14 +112,18 @@ function PersonColumn({ person, chores, date, canCheck }: { person: PersonDto; c
 
 export function ChoresView() {
   const focusedDate = useUi((s) => s.focusedDate)
-  const hiddenPeople = useUi((s) => s.hiddenPeople)
+  const viewingContext = useUi((s) => s.viewingContext)
   const setSettingsOpen = useUi((s) => s.setSettingsOpen)
   const { data: people = [] } = usePeople()
   const { data: chores = [] } = useChoresDay(focusedDate)
   const [rewardsOpen, setRewardsOpen] = useState(false)
   const day = DateTime.fromISO(focusedDate, { zone: ZONE })
-  // checking off chores for other days is allowed only for today and the past
-  const canCheck = focusedDate <= DateTime.now().setZone(ZONE).toISODate()!
+  const display = isDisplayClient()
+  // A display may only change the current household day. Parent corrections
+  // remain available in the dedicated administration app.
+  const canCheck = display
+    ? isToday(focusedDate)
+    : focusedDate <= DateTime.now().setZone(ZONE).toISODate()!
 
   const byPerson = new Map<string, DayChoreDto[]>()
   for (const c of chores) {
@@ -125,7 +131,7 @@ export function ChoresView() {
     arr.push(c)
     byPerson.set(c.personId, arr)
   }
-  const columns = people.filter((p) => !hiddenPeople.includes(p.id) && byPerson.has(p.id))
+  const columns = peopleInViewingContext(viewingContext, people).filter((p) => byPerson.has(p.id))
 
   return (
     <div className="flex h-full flex-col px-6 pb-6">
@@ -146,9 +152,9 @@ export function ChoresView() {
           <p className="max-w-md text-base font-semibold text-ink-soft">
             Parents can set up routines and chores in Settings → Chores.
           </p>
-          <BigButton variant="ghost" onClick={() => setSettingsOpen(true)}>
+          {!display && <BigButton variant="ghost" onClick={() => setSettingsOpen(true)}>
             Open settings
-          </BigButton>
+          </BigButton>}
         </div>
       ) : (
         <div className="flex min-h-0 flex-1 justify-center gap-4 overflow-x-auto">

@@ -5,12 +5,12 @@ import { useMealMutations, useMeals } from '../../api/hooks'
 import { Dialog, BigButton, FieldLabel } from '../../components/ui'
 import { OskInput } from '../../components/Osk'
 import { ZONE } from '../../stores/uiStore'
+import { isDisplayClient } from '../../lib/clientMode'
 
 export const SLOT_META: Record<MealSlotKind, { letter: string; label: string; color: string }> = {
   breakfast: { letter: 'B', label: 'Breakfast', color: '#FFB224' },
   lunch: { letter: 'L', label: 'Lunch', color: '#46A758' },
-  dinner: { letter: 'D', label: 'Dinner', color: '#D95B3A' },
-  snack: { letter: 'S', label: 'Snack', color: '#6E56CF' }
+  dinner: { letter: 'D', label: 'Dinner', color: '#D95B3A' }
 }
 
 /** Meals for the days covered by a UTC instant range (as used by calendar views). */
@@ -42,6 +42,18 @@ export function MealStrip({
   onOpen: (date: string) => void
   compact?: boolean
 }) {
+  const display = isDisplayClient()
+  if (display) {
+    return (
+      <div className="w-full rounded-xl border border-dashed border-line/80 bg-card/50 px-2 py-1.5 text-left">
+        {meals.length === 0 ? (
+          <span className={`font-bold text-ink-faint ${compact ? 'text-xs' : 'text-sm'}`}>Meals not planned</span>
+        ) : (
+          <MealLines meals={meals} compact={compact} />
+        )}
+      </div>
+    )
+  }
   return (
     <button
       type="button"
@@ -51,22 +63,19 @@ export function MealStrip({
       {meals.length === 0 ? (
         <span className={`font-bold text-ink-faint ${compact ? 'text-xs' : 'text-sm'}`}>+ Meals</span>
       ) : (
-        <span className="flex flex-col gap-0.5">
-          {meals.map((m) => (
-            <span key={m.slot} className={`flex items-center gap-1.5 ${compact ? 'text-xs' : 'text-sm'}`}>
-              <span
-                className="flex h-4.5 w-4.5 shrink-0 items-center justify-center rounded-full text-[10px] font-extrabold text-white"
-                style={{ backgroundColor: SLOT_META[m.slot].color }}
-              >
-                {SLOT_META[m.slot].letter}
-              </span>
-              <span className="truncate font-bold text-ink-soft">{m.text}</span>
-            </span>
-          ))}
-        </span>
+        <MealLines meals={meals} compact={compact} />
       )}
     </button>
   )
+}
+
+function MealLines({ meals, compact }: { meals: MealSlotDto[]; compact: boolean }) {
+  return <span className="flex flex-col gap-0.5">{meals.map((m) => (
+    <span key={m.slot} className={`flex items-center gap-1.5 ${compact ? 'text-xs' : 'text-sm'}`}>
+      <span className="flex h-4.5 w-4.5 shrink-0 items-center justify-center rounded-full text-[10px] font-extrabold text-white" style={{ backgroundColor: SLOT_META[m.slot].color }}>{SLOT_META[m.slot].letter}</span>
+      <span className="truncate font-bold text-ink-soft">{m.text}</span>
+    </span>
+  ))}</span>
 }
 
 export function MealsDialog({

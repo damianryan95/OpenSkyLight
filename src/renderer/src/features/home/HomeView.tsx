@@ -86,6 +86,9 @@ export function HomeView() {
           const isActive = grid.activeTileId === tile.id
           if (!editing) {
             const navTarget = TILE_REGISTRY[tile.type].navTarget
+            // Chore boards contain their own completion buttons, so they must
+            // not be nested in the generic navigation button.
+            if (tile.type === 'choresProgress' || tile.type === 'familyChores' || tile.type === 'familyRewards') return <div key={tile.id} data-tile-id={tile.id} data-tile-type={tile.type} style={grid.tileStyle(tile)} className="animate-rise rounded-card bg-card p-4 shadow-card overflow-hidden"><TileBody tile={tile} compact={compact} /></div>
             return (
               <button
                 key={tile.id}
@@ -163,7 +166,7 @@ export function HomeView() {
         >
           <PencilIcon size={22} />
         </button>
-      ) : (
+      ) : editing ? (
         <div className="fixed inset-x-0 bottom-5 z-30 flex justify-center">
           <div className="flex items-center gap-3 rounded-full bg-ink/90 p-2 shadow-float backdrop-blur-sm">
             <BigButton variant="ghost" onClick={() => setAddOpen(true)}>
@@ -179,7 +182,7 @@ export function HomeView() {
             </BigButton>
           </div>
         </div>
-      )}
+      ) : null}
 
       <AddTileSheet
         open={addOpen}

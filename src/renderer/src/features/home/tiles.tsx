@@ -1,7 +1,6 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useState } from 'react'
 import { DateTime } from 'luxon'
 import { useQuery } from '@tanstack/react-query'
-import mpegts from 'mpegts.js'
 import type { HomeTile } from '@shared/types'
 import { presetById } from '@shared/rss'
 import { agendaRange, dayRange, eachDay } from '@shared/dates'
@@ -12,20 +11,23 @@ import {
   useLists,
   useMeals,
   usePeople,
+  useRewards,
   useSettings,
   useWeather
 } from '../../api/hooks'
 import { useCalendarData } from '../calendar/useCalendarData'
-import { useKioskState } from '../../stores/kioskStore'
 import { useTimers } from '../../stores/timerStore'
 import { formatDuration } from '@shared/timer'
 import { startAlarm, stopAlarm } from '../../lib/alarm'
-import { weatherIcon } from '../weather/WeatherHeader'
+import { weatherIcon, weatherWords } from '../weather/WeatherHeader'
 import { SLOT_META } from '../meals/Meals'
-import { ZONE } from '../../stores/uiStore'
+import { useUi, ZONE } from '../../stores/uiStore'
 import { formatTime, initials, textOn } from '../../lib/format'
 import { occurrenceColor } from '../../lib/colors'
+import { peopleInViewingContext } from '@shared/viewingContext'
+import { choreIconSymbol } from '@shared/choreIcons'
 import { CheckIcon } from '../../components/icons'
+import { useChoreMutations } from '../../api/hooks'
 
 export interface TileProps {
   tile: HomeTile
@@ -45,6 +47,12 @@ function Placeholder({ children }: { children: React.ReactNode }) {
       {children}
     </div>
   )
+}
+
+function IconVisual({ icon, size = 'text-2xl' }: { icon: string | null; size?: string }) {
+  return icon?.startsWith('data:image/svg+xml;base64,')
+    ? <img src={icon} alt="" className="h-7 w-7 shrink-0 object-contain" />
+    : <span className={`${size} shrink-0 leading-none`} aria-hidden="true">{choreIconSymbol(icon)}</span>
 }
 
 const today = (): string => DateTime.now().setZone(ZONE).toISODate()!
@@ -133,13 +141,16 @@ export function WeatherTile({ tile, compact }: TileProps) {
   if (!settings?.weather) return <Placeholder>Set a location in Settings → General</Placeholder>
   if (!weather) return <Placeholder>Loading forecast…</Placeholder>
   const Icon = weatherIcon(weather.code, weather.isDay)
-  const showForecast = tile.w >= 3 && !compact
+  const tiny = tile.h === 1
+  const showForecast = tile.w >= 3 && tile.h >= 2 && !compact
+  const showDetails = tile.h >= 3 && !compact
   return (
     <div className="flex h-full flex-col overflow-hidden">
-      <div className="flex flex-1 items-center justify-center gap-3">
-        <Icon size={compact ? 34 : 44} className="text-ember-deep" />
-        <span className={`font-display ${compact ? 'text-4xl' : 'text-5xl'}`}>{weather.temperature}°</span>
+      <div className={`flex flex-1 items-center justify-center gap-3 ${tiny ? 'py-0' : 'py-1'}`}>
+        <Icon size={tiny ? 28 : compact ? 34 : 44} className="text-ember-deep" />
+        <span><span className={`block font-display leading-none ${tiny ? 'text-3xl' : compact ? 'text-4xl' : 'text-5xl'}`}>{weather.temperature}°</span>{!tiny && <span className="block text-sm font-extrabold text-ink-soft">{weather.description}</span>}</span>
       </div>
+      {showDetails && <div className="mb-2 flex justify-center gap-3 text-xs font-extrabold text-ink-faint"><span>{weather.description}</span><span>Wind {weather.windSpeed} km/h</span>{weather.daily[0]?.precipProb != null && <span>Rain {weather.daily[0].precipProb}%</span>}</div>}
       {showForecast && (
         <div className="flex shrink-0 justify-around pb-1">
           {weather.daily.slice(0, 4).map((d, i) => {
@@ -150,6 +161,7 @@ export function WeatherTile({ tile, compact }: TileProps) {
                   {i === 0 ? 'Now' : DateTime.fromISO(d.date).toFormat('ccc')}
                 </span>
                 <DayIcon size={16} className="text-ember-deep" />
+                {!compact && <span className="text-[9px] font-bold text-ink-faint">{weatherWords(d.code)}</span>}
                 <span className="text-xs font-bold">{d.high}°</span>
               </span>
             )
@@ -163,39 +175,32 @@ export function WeatherTile({ tile, compact }: TileProps) {
 export function ChoresProgressTile({ compact }: TileProps) {
   const { data: chores = [] } = useChoresDay(today())
   const { data: people = [] } = usePeople()
-  const withChores = people.filter((p) => chores.some((c) => c.personId === p.id))
+  const viewingContext = useUi((s) => s.viewingContext)
+  const mutations = useChoreMutations()
+  const withChores = peopleInViewingContext(viewingContext, people).filter((p) => chores.some((c) => c.personId === p.id))
+  const shown = chores.filter((chore) => withChores.some((person) => person.id === chore.personId))
   return (
     <div className="flex h-full flex-col overflow-hidden">
       <TileTitle>Chores today</TileTitle>
-      {withChores.length === 0 ? (
+      {shown.length === 0 ? (
         <Placeholder>No chores today</Placeholder>
       ) : (
-        <div className="flex min-h-0 flex-1 flex-col justify-center gap-2 overflow-hidden">
-          {withChores.map((p) => {
-            const mine = chores.filter((c) => c.personId === p.id)
-            const done = mine.filter((c) => c.completed).length
-            const pct = mine.length === 0 ? 0 : Math.round((done / mine.length) * 100)
+        <div className="flex min-h-0 flex-1 flex-col gap-1.5 overflow-y-auto pr-1">
+          {shown.map((chore) => {
+            const person = people.find((candidate) => candidate.id === chore.personId)
+            if (!person) return null
             return (
-              <div key={p.id} className="flex items-center gap-2">
+              <button key={chore.choreId} type="button" onClick={() => chore.completed ? mutations.uncomplete.mutate({ choreId: chore.choreId, date: today() }) : mutations.complete.mutate({ choreId: chore.choreId, date: today() })} className={`pressable flex min-h-11 items-center gap-2 rounded-xl bg-paper-deep/60 px-2 text-left ${chore.completed ? 'opacity-65' : ''}`}>
+                <IconVisual icon={chore.icon} size="text-xl" />
                 <span
-                  className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-[10px] font-extrabold"
-                  style={{ backgroundColor: p.color, color: textOn(p.color) }}
+                  className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full border-2 text-[10px] font-extrabold"
+                  style={{ borderColor: person.color, backgroundColor: chore.completed ? person.color : 'transparent', color: chore.completed ? textOn(person.color) : person.color }}
                 >
-                  {initials(p.name)}
+                  {chore.completed ? <CheckIcon size={16} /> : initials(person.name)}
                 </span>
-                <span className="min-w-0 flex-1">
-                  {!compact && <span className="block truncate text-xs font-bold">{p.name}</span>}
-                  <span className="block h-2.5 overflow-hidden rounded-full bg-paper-deep">
-                    <span
-                      className="block h-full rounded-full transition-all"
-                      style={{ width: `${pct}%`, backgroundColor: p.color }}
-                    />
-                  </span>
-                </span>
-                <span className="shrink-0 text-xs font-extrabold text-ink-soft">
-                  {done === mine.length ? <CheckIcon size={16} className="text-[#46A758]" /> : `${done}/${mine.length}`}
-                </span>
-              </div>
+                <span className={`min-w-0 flex-1 truncate font-bold ${compact ? 'text-sm' : 'text-base'} ${chore.completed ? 'line-through' : ''}`}>{chore.title}</span>
+                {!compact && <span className="shrink-0 text-xs font-extrabold text-ember-deep">★ {chore.starsValue}</span>}
+              </button>
             )
           })}
         </div>
@@ -204,29 +209,75 @@ export function ChoresProgressTile({ compact }: TileProps) {
   )
 }
 
+/** A wall-friendly family board inspired by paper chore charts: each child
+ * owns a coloured column, while time-of-day keeps their routine scannable. */
+export function FamilyChoresTile({ compact }: TileProps) {
+  const { data: chores = [] } = useChoresDay(today())
+  const { data: people = [] } = usePeople()
+  const viewingContext = useUi((s) => s.viewingContext)
+  const mutations = useChoreMutations()
+  const contextPeople = peopleInViewingContext(viewingContext, people)
+  const children = contextPeople.filter((person) => person.role === 'child' && chores.some((chore) => chore.personId === person.id))
+  const shown = children.length > 0 ? children : contextPeople.filter((person) => chores.some((chore) => chore.personId === person.id))
+  const groups: Array<{ label: string; routine: 'morning' | 'evening' | null }> = [
+    { label: 'Morning', routine: 'morning' }, { label: 'Anytime', routine: null }, { label: 'Evening', routine: 'evening' }
+  ]
+  return <div className="flex h-full flex-col overflow-hidden">
+    <TileTitle>Family chores</TileTitle>
+    {shown.length === 0 ? <Placeholder>No chores today</Placeholder> : <div className="grid min-h-0 flex-1 auto-cols-[minmax(10.5rem,1fr)] grid-flow-col gap-3 overflow-x-auto pb-1">
+      {shown.map((person) => {
+        const personChores = chores.filter((chore) => chore.personId === person.id)
+        const completed = personChores.filter((chore) => chore.completed).length
+        return <section key={person.id} className="flex min-h-0 flex-col rounded-[1.7rem] p-2.5" style={{ backgroundColor: `${person.color}1F` }}>
+          <header className="mb-2 flex items-center gap-2 px-1">
+            <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-sm font-extrabold" style={{ backgroundColor: person.color, color: textOn(person.color) }}>{initials(person.name)}</span>
+            <span className="min-w-0 flex-1"><span className="block truncate font-display text-xl leading-none">{person.name}</span><span className="mt-1 flex h-5 items-center justify-center rounded-full text-[10px] font-extrabold" style={{ backgroundColor: `${person.color}25`, color: person.color }}>✓ {completed}/{personChores.length}</span></span>
+          </header>
+          <div className="min-h-0 flex-1 space-y-2 overflow-y-auto px-0.5 pr-1">
+            {groups.map((group) => {
+              const groupChores = personChores.filter((chore) => chore.routine === group.routine)
+              if (groupChores.length === 0) return null
+              return <div key={group.label}><p className="mb-1 px-1 text-xs font-extrabold tracking-wide text-ink-soft uppercase">{group.label}</p><div className="space-y-1.5">
+                {groupChores.map((chore) => <button key={chore.choreId} type="button" onClick={() => chore.completed ? mutations.uncomplete.mutate({ choreId: chore.choreId, date: today() }) : mutations.complete.mutate({ choreId: chore.choreId, date: today() })} className={`pressable flex min-h-14 w-full items-center gap-2 rounded-2xl px-2.5 text-left ${chore.completed ? 'opacity-60' : ''}`} style={{ backgroundColor: chore.completed ? person.color : `${person.color}16`, color: chore.completed ? textOn(person.color) : undefined }}>
+                  <IconVisual icon={chore.icon} />
+                  <span className={`min-w-0 flex-1 truncate font-bold ${compact ? 'text-sm' : 'text-base'} ${chore.completed ? 'line-through' : ''}`}>{chore.title}</span>
+                  <span className="shrink-0 text-xs font-extrabold">★ {chore.starsValue}</span>
+                  <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full border-2" style={{ borderColor: chore.completed ? textOn(person.color) : person.color }}>{chore.completed && <CheckIcon size={15} />}</span>
+                </button>)}
+              </div></div>
+            })}
+          </div>
+        </section>
+      })}
+    </div>}
+  </div>
+}
+
 export function StarBalancesTile({ compact }: TileProps) {
   const { data: people = [] } = usePeople()
   const { data: balances = [] } = useBalances()
-  const kids = people.filter((p) => p.role === 'child')
-  const shown = kids.length > 0 ? kids : people
+  const viewingContext = useUi((s) => s.viewingContext)
+  const contextPeople = peopleInViewingContext(viewingContext, people)
+  const kids = contextPeople.filter((p) => p.role === 'child')
+  const shown = kids.length > 0 ? kids : contextPeople
   return (
     <div className="flex h-full flex-col overflow-hidden">
       <TileTitle>Stars</TileTitle>
       {shown.length === 0 ? (
         <Placeholder>Add family members in Settings</Placeholder>
       ) : (
-        <div className="flex min-h-0 flex-1 flex-col justify-center gap-1.5 overflow-hidden">
+        <div className="flex min-h-0 flex-1 flex-col justify-center gap-2 overflow-hidden">
           {shown.map((p) => (
-            <div key={p.id} className="flex items-center gap-2">
+            <div key={p.id} className="flex items-center gap-2.5">
               <span
-                className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-[10px] font-extrabold"
+                className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-xs font-extrabold"
                 style={{ backgroundColor: p.color, color: textOn(p.color) }}
               >
                 {initials(p.name)}
               </span>
-              {!compact && <span className="min-w-0 flex-1 truncate text-sm font-bold">{p.name}</span>}
-              <span className={`font-extrabold text-ember-deep ${compact ? 'ml-auto text-sm' : 'text-base'}`}>
-                ★ {balances.find((b) => b.personId === p.id)?.balance ?? 0}
+              {!compact && <span className="min-w-0 flex-1 truncate text-base font-bold">{p.name}</span>}
+              <span className={`ml-auto flex items-center gap-1 font-display font-extrabold text-ember-deep ${compact ? 'text-2xl' : 'text-3xl'}`}>
+                <span className="text-[1.12em] leading-none">★</span>{balances.find((b) => b.personId === p.id)?.balance ?? 0}
               </span>
             </div>
           ))}
@@ -234,6 +285,25 @@ export function StarBalancesTile({ compact }: TileProps) {
       )}
     </div>
   )
+}
+
+export function FamilyRewardsTile({ compact }: TileProps) {
+  const { data: people = [] } = usePeople()
+  const { data: balances = [] } = useBalances()
+  const { data: rewards = [] } = useRewards()
+  const viewingContext = useUi((s) => s.viewingContext)
+  const contextPeople = peopleInViewingContext(viewingContext, people)
+  const children = contextPeople.filter((person) => person.role === 'child')
+  const shown = children.length > 0 ? children : contextPeople
+  const activeRewards = rewards.filter((reward) => reward.active)
+  return <div className="flex h-full flex-col overflow-hidden"><TileTitle>Family rewards</TileTitle>
+    {shown.length === 0 ? <Placeholder>Add children to show rewards</Placeholder> : activeRewards.length === 0 ? <Placeholder>No rewards available yet</Placeholder> : <div className="grid min-h-0 flex-1 auto-cols-[minmax(11rem,1fr)] grid-flow-col gap-3 overflow-x-auto pb-1">
+      {shown.map((person) => {
+        const balance = balances.find((entry) => entry.personId === person.id)?.balance ?? 0
+        return <section key={person.id} className="flex min-h-0 flex-col rounded-[1.7rem] p-2.5" style={{ backgroundColor: `${person.color}1F` }}><header className="mb-2 flex items-center gap-2 px-1"><span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-sm font-extrabold" style={{ backgroundColor: person.color, color: textOn(person.color) }}>{initials(person.name)}</span><span className="min-w-0 flex-1"><span className="block truncate font-display text-xl leading-none">{person.name}</span><span className="mt-1 inline-flex rounded-full px-2 py-0.5 text-xs font-extrabold" style={{ backgroundColor: `${person.color}25`, color: person.color }}>★ {balance}</span></span></header><div className="min-h-0 flex-1 space-y-2 overflow-y-auto px-0.5 pr-1">{activeRewards.map((reward) => { const progress = Math.min(100, Math.round(balance / reward.costStars * 100)); return <div key={reward.id} className="rounded-2xl bg-card p-3 shadow-card"><div className="flex items-center gap-2"><IconVisual icon={reward.icon} /><span className={`min-w-0 flex-1 font-bold ${compact ? 'text-sm' : 'text-base'}`}>{reward.title}</span></div><div className="mt-2 h-5 overflow-hidden rounded-full bg-paper-deep" aria-label={`${balance} of ${reward.costStars} stars`}><div className="flex h-full items-center justify-center text-[10px] font-extrabold" style={{ width: `${Math.max(progress, 18)}%`, backgroundColor: `${person.color}70`, color: textOn(person.color) }}>★ {balance}/{reward.costStars}</div></div></div> })}</div></section>
+      })}
+    </div>}
+  </div>
 }
 
 export function ListTile({ tile, compact }: TileProps) {
@@ -376,12 +446,13 @@ export function TimerTile({ compact }: TileProps) {
   }, [anyRinging])
 
   const preset = (sec: number): string => (sec >= 60 ? `${sec / 60}m` : `${sec}s`)
+  const singleTimer = timers.length === 1 ? timers[0] : undefined
 
   return (
-    <div className="flex h-full flex-col overflow-hidden">
+    <div className="flex h-full flex-col overflow-hidden [container-type:size]">
       <TileTitle>Timers</TileTitle>
 
-      <div className="mb-2 flex shrink-0 flex-wrap gap-1.5">
+      {!singleTimer && <div className="mb-2 flex shrink-0 flex-wrap gap-1.5">
         {TIMER_PRESETS_SEC.map((sec) => (
           <button
             key={sec}
@@ -393,13 +464,22 @@ export function TimerTile({ compact }: TileProps) {
             {preset(sec)}
           </button>
         ))}
-      </div>
+      </div>}
 
       {timers.length === 0 ? (
         <div className="flex flex-1 items-center justify-center px-2 text-center text-sm font-bold text-ink-faint">
           Tap a preset, or say “set a timer for 5 minutes”
         </div>
-      ) : (
+      ) : singleTimer ? (() => {
+        const remaining = Math.max(0, Math.ceil((singleTimer.endsAt - now) / 1000)); const ringing = remaining <= 0
+        const pct = Math.min(100, Math.max(0, (1 - remaining / singleTimer.durationSec) * 100))
+        return <div className={`flex min-h-0 flex-1 flex-col items-center justify-center rounded-2xl px-3 text-center ${ringing ? 'animate-pulse bg-ember text-white' : 'bg-paper-deep/60'}`}>
+          {singleTimer.label && <span className={`mb-2 max-w-full truncate text-sm font-extrabold ${ringing ? 'text-white/90' : 'text-ink-faint'}`}>{singleTimer.label}</span>}
+          <span className="font-display tabular-nums leading-[0.78] text-[clamp(3rem,58cqh,11rem)]">{ringing ? 'Done!' : formatDuration(remaining)}</span>
+          {!ringing && <span className="mt-4 block h-2 w-4/5 overflow-hidden rounded-full bg-paper-deep"><span className="block h-full rounded-full bg-ember transition-all" style={{ width: `${pct}%` }} /></span>}
+          <button type="button" aria-label={ringing ? `Dismiss ${singleTimer.label ?? 'timer'}` : `Cancel ${singleTimer.label ?? 'timer'}`} onClick={() => cancel(singleTimer.id)} className={`pressable mt-4 rounded-full px-5 py-2 text-sm font-extrabold ${ringing ? 'bg-white/25 text-white' : 'bg-card text-ink-soft'}`}>{ringing ? 'Dismiss' : 'Cancel'}</button>
+        </div>
+      })() : (
         <div className="flex min-h-0 flex-1 flex-col gap-1.5 overflow-y-auto">
           {timers.map((t) => {
             const remaining = Math.max(0, Math.ceil((t.endsAt - now) / 1000))
@@ -441,159 +521,6 @@ export function TimerTile({ compact }: TileProps) {
             )
           })}
         </div>
-      )}
-    </div>
-  )
-}
-
-export function BirdNetTile({ tile, compact }: TileProps) {
-  const url = tile.config?.birdnetUrl
-  const covered = useKioskState((s) => s.covered)
-  const { data, isError } = useQuery({
-    queryKey: ['birdnet', url],
-    queryFn: () => ipcInvoke('birdnet:getDetections', { url: url! }),
-    enabled: !!url && !covered,
-    refetchInterval: 20_000
-  })
-
-  if (!url) return <Placeholder>Add your BirdNET-Go URL — re-add this tile</Placeholder>
-
-  const maxItems = compact ? 3 : Math.max(2, tile.h * 2 - 1)
-  return (
-    <div className="flex h-full flex-col overflow-hidden">
-      <TileTitle>Birds</TileTitle>
-      {isError && !data ? (
-        <Placeholder>Couldn&apos;t reach BirdNET — will retry</Placeholder>
-      ) : !data ? (
-        <Placeholder>Loading detections…</Placeholder>
-      ) : data.detections.length === 0 ? (
-        <Placeholder>No detections yet</Placeholder>
-      ) : (
-        <div className="flex min-h-0 flex-col gap-1.5 overflow-hidden">
-          {data.detections.slice(0, maxItems).map((det) => (
-            <div key={`${det.id}-${det.timestamp}`} className="flex min-w-0 items-center gap-2">
-              {det.image && (
-                <img
-                  src={det.image}
-                  alt=""
-                  loading="lazy"
-                  onError={(e) => (e.currentTarget.style.display = 'none')}
-                  className={`shrink-0 rounded-lg object-cover ${compact ? 'h-7 w-7' : 'h-9 w-9'}`}
-                />
-              )}
-              <span className="min-w-0 flex-1">
-                <span className={`block truncate font-bold ${compact ? 'text-sm' : 'text-base'}`}>
-                  {det.commonName}
-                </span>
-                <span className="block text-[11px] font-bold text-ink-faint">
-                  {Math.round(det.confidence * 100)}% · {DateTime.fromISO(det.timestamp).toRelative()}
-                </span>
-              </span>
-            </div>
-          ))}
-        </div>
-      )}
-    </div>
-  )
-}
-
-const CAMERA_RETRY_MS = 10_000
-
-export function CameraTile({ tile }: TileProps) {
-  const cameraId = tile.config?.cameraId ?? null
-  const { data: cameras, isPending: camerasLoading } = useQuery({
-    queryKey: ['cameras'],
-    queryFn: () => ipcInvoke('camera:list', undefined)
-  })
-  const camera = (cameras ?? []).find((c) => c.id === cameraId)
-  // depend on stable scalars, not the array entry — unrelated cache refreshes
-  // must not tear down a live stream
-  const cameraFound = camera !== undefined
-  const covered = useKioskState((s) => s.covered)
-  const videoRef = useRef<HTMLVideoElement>(null)
-  const [status, setStatus] = useState<'connecting' | 'live' | 'error'>('connecting')
-  const [retryKey, setRetryKey] = useState(0)
-
-  useEffect(() => {
-    const video = videoRef.current
-    if (!cameraId || !cameraFound || !video || covered) return
-    if (!mpegts.isSupported()) {
-      setStatus('error')
-      return
-    }
-    let player: mpegts.Player | null = null
-    let stopped = false
-    let sessionId: string | null = null
-    let wentLive = false
-    let retryTimer: number | undefined
-    setStatus('connecting')
-
-    const fail = (): void => {
-      if (stopped || retryTimer !== undefined) return
-      setStatus('error')
-      retryTimer = window.setTimeout(() => setRetryKey((k) => k + 1), CAMERA_RETRY_MS)
-    }
-    // a stream that never produces media within 15s is dead — retry
-    const watchdog = window.setTimeout(() => {
-      if (!wentLive) fail()
-    }, 15_000)
-    // the <video> element rendering frames is the ground truth for liveness:
-    // some streams (e.g. UniFi Protect) play fine without mpegts.js ever
-    // emitting MEDIA_INFO, and the watchdog must not kill those
-    const goLive = (): void => {
-      if (stopped) return
-      wentLive = true
-      setStatus('live')
-    }
-    video.addEventListener('playing', goLive)
-
-    ipcInvoke('camera:start', { cameraId })
-      .then((res) => {
-        if (stopped) {
-          void ipcInvoke('camera:stop', { sessionId: res.sessionId })
-          return
-        }
-        sessionId = res.sessionId
-        player = mpegts.createPlayer(
-          { type: 'mpegts', isLive: true, url: res.wsUrl },
-          { enableStashBuffer: false, liveBufferLatencyChasing: true, autoCleanupSourceBuffer: true }
-        )
-        player.attachMediaElement(video)
-        player.on(mpegts.Events.ERROR, fail)
-        player.on(mpegts.Events.MEDIA_INFO, goLive)
-        player.load()
-        void player.play()?.catch(() => undefined)
-      })
-      .catch(fail)
-
-    return () => {
-      stopped = true
-      video.removeEventListener('playing', goLive)
-      window.clearTimeout(watchdog)
-      if (retryTimer) window.clearTimeout(retryTimer)
-      try {
-        player?.destroy()
-      } catch {
-        // already torn down
-      }
-      if (sessionId) void ipcInvoke('camera:stop', { sessionId })
-    }
-  }, [cameraId, cameraFound, covered, retryKey])
-
-  if (!cameraId || camerasLoading) return <Placeholder>Connecting…</Placeholder>
-  if (!camera) return <Placeholder>Camera not found — re-add this tile</Placeholder>
-
-  return (
-    <div className="relative -m-4 h-[calc(100%+2rem)] overflow-hidden bg-black/90">
-      <video ref={videoRef} muted autoPlay playsInline className="h-full w-full object-cover" />
-      <span className="absolute top-2 left-2 rounded-full bg-black/55 px-2.5 py-1 text-xs font-extrabold text-white/90">
-        {camera.name}
-        {status === 'live' && <span className="ml-1.5 inline-block h-2 w-2 rounded-full bg-[#e5484d] align-middle" />}
-      </span>
-      {status !== 'live' && (
-        <span className="absolute inset-0 flex items-center justify-center text-sm font-bold text-white/70">
-          {status === 'connecting' ? 'Connecting…' : 'Camera unavailable — retrying'}
-        </span>
       )}
     </div>
   )

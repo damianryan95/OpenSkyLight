@@ -41,6 +41,12 @@ describe('expandOccurrences', () => {
     expect(occs).toHaveLength(0)
   })
 
+  it('accepts Google fixed-offset time zones', () => {
+    const occs = expandOccurrences(master({ tz: 'GMT+08:00' }), [], '2026-06-01T00:00:00Z', '2026-06-08T00:00:00Z')
+    expect(occs).toHaveLength(1)
+    expect(occs[0].start).toBe('2026-06-01T14:00:00Z')
+  })
+
   it('expands a daily rule within the window only', () => {
     const m = master({ rrule: 'FREQ=DAILY' })
     const occs = expandOccurrences(m, [], '2026-06-03T00:00:00Z', '2026-06-06T00:00:00Z')

@@ -1,10 +1,10 @@
 import type { ComponentType } from 'react'
 import type { CalendarViewKind, HomeTileType } from '@shared/types'
 import {
-  BirdNetTile,
-  CameraTile,
   TimerTile,
   ChoresProgressTile,
+  FamilyChoresTile,
+  FamilyRewardsTile,
   ClockTile,
   ListTile,
   MealsTile,
@@ -49,6 +49,18 @@ export const TILE_REGISTRY: Record<HomeTileType, TileMeta> = {
     component: ChoresProgressTile,
     navTarget: 'chores'
   },
+  familyChores: {
+    label: 'Family chores',
+    description: 'Each child’s morning and evening chores side by side',
+    component: FamilyChoresTile,
+    navTarget: 'chores'
+  },
+  familyRewards: {
+    label: 'Family rewards',
+    description: 'Each child’s progress towards household rewards',
+    component: FamilyRewardsTile,
+    navTarget: 'chores'
+  },
   starBalances: {
     label: 'Star balances',
     description: 'Stars earned by each child',
@@ -81,16 +93,6 @@ export const TILE_REGISTRY: Record<HomeTileType, TileMeta> = {
     label: 'News headlines',
     description: 'Top stories from a news feed you pick',
     component: NewsTile
-  },
-  camera: {
-    label: 'Camera',
-    description: 'Live view from an IP camera (RTSP)',
-    component: CameraTile
-  },
-  birdnet: {
-    label: 'Birds',
-    description: 'Recent detections from your BirdNET-Go',
-    component: BirdNetTile
   },
   timer: {
     label: 'Timers',

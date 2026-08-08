@@ -1,19 +1,15 @@
 import { useState } from 'react'
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import type { HomeTile, HomeTileType } from '@shared/types'
 import { findFreeSpot, TILE_SPECS } from '@shared/home'
 import { PRESET_FEEDS } from '@shared/rss'
 import { uuidv7 } from '@shared/uuid'
-import { ipcInvoke } from '../../api/client'
 import { useLists } from '../../api/hooks'
 import { useToasts } from '../../stores/toastStore'
-import { BigButton, FieldLabel, Sheet } from '../../components/ui'
-import { OskInput } from '../../components/Osk'
-import { XIcon } from '../../components/icons'
+import { FieldLabel, Sheet } from '../../components/ui'
 import { TILE_REGISTRY } from './tileRegistry'
 
 const TILE_TYPES = Object.keys(TILE_REGISTRY) as HomeTileType[]
-type PickerStep = null | 'list' | 'news' | 'camera' | 'birdnet'
+type PickerStep = null | 'list' | 'news'
 
 export function AddTileSheet({
   open,
@@ -57,11 +53,7 @@ export function AddTileSheet({
       ? 'Which list?'
       : picker === 'news'
         ? 'Which news feed?'
-        : picker === 'camera'
-          ? 'Which camera?'
-          : picker === 'birdnet'
-            ? 'BirdNET-Go address'
-            : 'Add a tile'
+        : 'Add a tile'
 
   return (
     <Sheet
@@ -89,10 +81,6 @@ export function AddTileSheet({
             </button>
           ))}
         </div>
-      ) : picker === 'camera' ? (
-        <CameraPicker onPick={(cameraId) => place('camera', { cameraId })} />
-      ) : picker === 'birdnet' ? (
-        <BirdNetPicker onPick={(birdnetUrl) => place('birdnet', { birdnetUrl })} />
       ) : picker === 'news' ? (
         <div className="flex flex-col gap-4 pb-2">
           {(['us', 'world'] as const).map((region) => (
@@ -125,7 +113,7 @@ export function AddTileSheet({
                 type="button"
                 disabled={alreadyPlaced}
                 onClick={() =>
-                  type === 'list' || type === 'news' || type === 'camera' || type === 'birdnet'
+                  type === 'list' || type === 'news'
                     ? setPicker(type)
                     : place(type)
                 }
@@ -141,101 +129,5 @@ export function AddTileSheet({
         </div>
       )}
     </Sheet>
-  )
-}
-
-function CameraPicker({ onPick }: { onPick: (cameraId: string) => void }) {
-  const queryClient = useQueryClient()
-  const pushToast = useToasts((s) => s.push)
-  const { data: cameras = [] } = useQuery({ queryKey: ['cameras'], queryFn: () => ipcInvoke('camera:list', undefined) })
-  const [name, setName] = useState('')
-  const [url, setUrl] = useState('')
-
-  const addCamera = useMutation({
-    mutationFn: (input: { name: string; url: string }) => ipcInvoke('camera:add', input),
-    onSuccess: (camera) => {
-      void queryClient.invalidateQueries({ queryKey: ['cameras'] })
-      setName('')
-      setUrl('')
-      onPick(camera.id)
-    },
-    onError: (err: Error) => pushToast(err.message)
-  })
-
-  const removeCamera = useMutation({
-    mutationFn: (input: { cameraId: string }) => ipcInvoke('camera:remove', input),
-    onSuccess: () => void queryClient.invalidateQueries({ queryKey: ['cameras'] }),
-    onError: (err: Error) => pushToast(err.message)
-  })
-
-  return (
-    <div className="flex flex-col gap-3 pb-2">
-      {cameras.map((camera) => (
-        <div key={camera.id} className="flex items-center gap-2">
-          <button
-            type="button"
-            onClick={() => onPick(camera.id)}
-            className="pressable min-w-0 flex-1 rounded-2xl bg-paper-deep/50 p-4 text-left text-lg font-bold"
-          >
-            {camera.name}
-          </button>
-          <button
-            type="button"
-            aria-label={`Delete camera ${camera.name}`}
-            onClick={() => removeCamera.mutate({ cameraId: camera.id })}
-            className="pressable flex h-12 w-12 shrink-0 items-center justify-center rounded-full text-ink-faint hover:bg-paper-deep"
-          >
-            <XIcon size={18} />
-          </button>
-        </div>
-      ))}
-
-      <div className="flex flex-col gap-2 rounded-2xl bg-paper-deep/50 p-4">
-        <FieldLabel>Add a camera</FieldLabel>
-        <OskInput value={name} onChange={setName} placeholder="Name (e.g. Front door)" />
-        <OskInput value={url} onChange={setUrl} placeholder="rtsp://user:password@192.168.1.50:554/stream1" />
-        <p className="text-sm font-semibold text-ink-faint">
-          Use your camera's H.264 stream URL (check its app or manual). The URL is stored encrypted on this device.
-        </p>
-        <BigButton
-          onClick={() => addCamera.mutate({ name: name.trim() || 'Camera', url: url.trim() })}
-          disabled={!/^rtsps?:\/\/.+/i.test(url.trim()) || addCamera.isPending}
-        >
-          Add camera & place tile
-        </BigButton>
-      </div>
-    </div>
-  )
-}
-
-function BirdNetPicker({ onPick }: { onPick: (url: string) => void }) {
-  const pushToast = useToasts((s) => s.push)
-  const [url, setUrl] = useState('')
-  const [testing, setTesting] = useState(false)
-
-  const testAndAdd = async (): Promise<void> => {
-    setTesting(true)
-    try {
-      // the service normalizes (e.g. strips /ui/dashboard) and returns the origin to persist
-      const result = await ipcInvoke('birdnet:getDetections', { url: url.trim() })
-      onPick(result.url)
-    } catch (err) {
-      pushToast(err instanceof Error ? err.message : 'Could not reach BirdNET-Go')
-    } finally {
-      setTesting(false)
-    }
-  }
-
-  return (
-    <div className="flex flex-col gap-2 rounded-2xl bg-paper-deep/50 p-4">
-      <FieldLabel>BirdNET-Go address</FieldLabel>
-      <OskInput value={url} onChange={setUrl} placeholder="http://192.168.0.208:8080" />
-      <p className="text-sm font-semibold text-ink-faint">
-        Enter your BirdNET-Go web address on the LAN. The dashboard URL is fine — we'll trim it.
-      </p>
-      <BigButton onClick={() => void testAndAdd()} disabled={!/^https?:\/\/.+/i.test(url.trim()) || testing}>
-        {testing ? 'Testing…' : 'Test & place tile'}
-      </BigButton>
-    </div>
   )
 }

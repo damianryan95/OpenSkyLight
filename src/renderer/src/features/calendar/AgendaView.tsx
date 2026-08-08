@@ -1,6 +1,6 @@
 import { eachDay } from '@shared/dates'
 import { useSettings } from '../../api/hooks'
-import { useUi, ZONE } from '../../stores/uiStore'
+import { ZONE } from '../../stores/uiStore'
 import { occurrenceColor } from '../../lib/colors'
 import { isToday } from '../../lib/format'
 import { EventCard } from './EventCard'
@@ -10,8 +10,6 @@ export function AgendaView() {
   const range = useViewRange()
   const { byDay, peopleById, calendarsById } = useCalendarData(range)
   const { data: settings } = useSettings()
-  const openEdit = useUi((s) => s.openEdit)
-  const openCreate = useUi((s) => s.openCreate)
   const timeFormat = settings?.timeFormat ?? '12h'
   const days = eachDay(range, ZONE)
 
@@ -25,9 +23,7 @@ export function AgendaView() {
           const today = isToday(key)
           return (
             <div key={key} className="animate-rise flex gap-4 py-2" style={{ animationDelay: `${i * 30}ms` }}>
-              <button
-                type="button"
-                onClick={() => openCreate(key)}
+              <div
                 className={`pressable flex h-20 w-20 shrink-0 flex-col items-center justify-center rounded-2xl ${
                   today ? 'bg-ember text-white shadow-card' : 'bg-paper-deep/60 text-ink'
                 }`}
@@ -39,7 +35,7 @@ export function AgendaView() {
                 <span className={`text-xs font-bold ${today ? 'text-white/80' : 'text-ink-faint'}`}>
                   {day.toFormat('LLL')}
                 </span>
-              </button>
+              </div>
               <div className="flex min-w-0 flex-1 flex-col gap-2">
                 {occurrences.map((occ) => (
                   <EventCard
@@ -48,7 +44,6 @@ export function AgendaView() {
                     color={occurrenceColor(occ, peopleById, calendarsById)}
                     timeFormat={timeFormat}
                     peopleById={peopleById}
-                    onTap={() => openEdit(occ)}
                     size="lg"
                   />
                 ))}

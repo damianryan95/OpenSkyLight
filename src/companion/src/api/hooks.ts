@@ -71,7 +71,7 @@ export function useListMutations() {
 export function useMealMutations() {
   return {
     set: useInvalidatingMutation(
-      (input: { date: string; slot: 'breakfast' | 'lunch' | 'dinner' | 'snack'; text: string | null }) =>
+      (input: { date: string; slot: 'breakfast' | 'lunch' | 'dinner'; text: string | null }) =>
         rpc('meals:set', input),
       [['meals']]
     )

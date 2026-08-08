@@ -39,44 +39,6 @@ export const recurrenceSchema = z.object({
   count: z.number().int().min(1).max(999).optional()
 })
 
-export const eventCreateSchema = z.object({
-  calendarId: id,
-  title: z.string().trim().min(1).max(200),
-  description: z.string().max(2000).nullish(),
-  location: z.string().max(300).nullish(),
-  start: isoInstant,
-  end: isoInstant,
-  tz: z.string().min(1),
-  allDay: z.boolean(),
-  personIds: z.array(id).max(20),
-  recurrence: recurrenceSchema.nullish()
-})
-
-export const eventPatchSchema = z.object({
-  title: z.string().trim().min(1).max(200).optional(),
-  description: z.string().max(2000).nullable().optional(),
-  location: z.string().max(300).nullable().optional(),
-  start: isoInstant.optional(),
-  end: isoInstant.optional(),
-  tz: z.string().min(1).optional(),
-  allDay: z.boolean().optional(),
-  personIds: z.array(id).max(20).optional(),
-  recurrence: recurrenceSchema.nullable().optional()
-})
-
-export const eventUpdateSchema = z.object({
-  id,
-  scope: z.enum(['this', 'following', 'all']),
-  occurrenceStart: isoInstant.optional(),
-  changes: eventPatchSchema
-})
-
-export const eventDeleteSchema = z.object({
-  id,
-  scope: z.enum(['this', 'following', 'all']),
-  occurrenceStart: isoInstant.optional()
-})
-
 export const occurrenceQuerySchema = z.object({
   start: isoInstant,
   end: isoInstant
@@ -89,14 +51,14 @@ const homeTileSchema = z.object({
     'weekAgenda',
     'weather',
     'choresProgress',
+    'familyChores',
+    'familyRewards',
     'starBalances',
     'list',
     'meals',
     'clock',
     'photo',
     'news',
-    'camera',
-    'birdnet',
     'timer'
   ]),
   x: z.number().int().min(0).max(11),
@@ -109,33 +71,11 @@ const homeTileSchema = z.object({
     .object({
       listId: z.string().min(1).max(200).optional(),
       feedId: z.string().min(1).max(200).optional(),
-      cameraId: z.string().min(1).max(200).optional(),
-      birdnetUrl: z.string().min(1).max(200).optional()
     })
     .optional()
 })
 
 export const rssFeedSchema = z.object({ feedId: z.string().min(1).max(40) })
-
-export const birdnetUrlSchema = z.object({
-  url: z
-    .string()
-    .trim()
-    .max(500)
-    .regex(/^https?:\/\/.+/i, 'Must be an http:// or https:// URL')
-})
-
-export const cameraAddSchema = z.object({
-  name: z.string().trim().min(1).max(60),
-  url: z
-    .string()
-    .trim()
-    .max(500)
-    .regex(/^rtsps?:\/\/.+/i, 'Must be an rtsp:// or rtsps:// URL')
-})
-
-export const cameraIdSchema = z.object({ cameraId: id })
-export const cameraSessionSchema = z.object({ sessionId: id })
 
 export const settingsPatchSchema = z.object({
   patch: z
@@ -238,7 +178,7 @@ export const listIdSchema = z.object({ listId: id })
 export const mealsRangeSchema = z.object({ start: isoDate, end: isoDate })
 export const mealSetSchema = z.object({
   date: isoDate,
-  slot: z.enum(['breakfast', 'lunch', 'dinner', 'snack']),
+  slot: z.enum(['breakfast', 'lunch', 'dinner']),
   text: z.string().trim().max(200).nullable()
 })
 

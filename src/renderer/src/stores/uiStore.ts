@@ -1,30 +1,24 @@
 import { create } from 'zustand'
 import { DateTime } from 'luxon'
-import type { CalendarViewKind, OccurrenceDto } from '@shared/types'
+import type { CalendarViewKind } from '@shared/types'
+import { personContext, type ViewingContext } from '@shared/viewingContext'
 
 export const ZONE = Intl.DateTimeFormat().resolvedOptions().timeZone
-
-export type EditorState =
-  | { mode: 'closed' }
-  | { mode: 'create'; date: string }
-  | { mode: 'edit'; occurrence: OccurrenceDto }
 
 interface UiState {
   view: CalendarViewKind
   /** YYYY-MM-DD in the device zone */
   focusedDate: string
-  hiddenPeople: string[]
-  editor: EditorState
+  /** Ephemeral by design: every fresh kiosk launch begins in Family. */
+  viewingContext: ViewingContext
   settingsOpen: boolean
 
   setView(view: CalendarViewKind): void
   setFocusedDate(date: string): void
   goToday(): void
   step(direction: 1 | -1): void
-  togglePerson(id: string): void
-  openCreate(date?: string): void
-  openEdit(occurrence: OccurrenceDto): void
-  closeEditor(): void
+  selectFamily(): void
+  selectPerson(id: string): void
   setSettingsOpen(open: boolean): void
 }
 
@@ -33,8 +27,7 @@ const today = (): string => DateTime.now().setZone(ZONE).toISODate()!
 export const useUi = create<UiState>((set, get) => ({
   view: 'home',
   focusedDate: today(),
-  hiddenPeople: [],
-  editor: { mode: 'closed' },
+  viewingContext: 'family',
   settingsOpen: false,
 
   setView: (view) => set({ view }),
@@ -52,14 +45,7 @@ export const useUi = create<UiState>((set, get) => ({
           : d.plus({ weeks: direction })
     set({ focusedDate: next.toISODate()! })
   },
-  togglePerson: (id) =>
-    set((s) => ({
-      hiddenPeople: s.hiddenPeople.includes(id)
-        ? s.hiddenPeople.filter((p) => p !== id)
-        : [...s.hiddenPeople, id]
-    })),
-  openCreate: (date) => set({ editor: { mode: 'create', date: date ?? get().focusedDate } }),
-  openEdit: (occurrence) => set({ editor: { mode: 'edit', occurrence } }),
-  closeEditor: () => set({ editor: { mode: 'closed' } }),
+  selectFamily: () => set({ viewingContext: 'family' }),
+  selectPerson: (id) => set({ viewingContext: personContext(id) }),
   setSettingsOpen: (settingsOpen) => set({ settingsOpen })
 }))

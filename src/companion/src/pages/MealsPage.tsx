@@ -7,8 +7,7 @@ import { Card, PrimaryButton, TextInput } from '../components/ui'
 const SLOT_COLORS: Record<MealSlotKind, string> = {
   breakfast: '#FFB224',
   lunch: '#46A758',
-  dinner: '#D95B3A',
-  snack: '#6E56CF'
+  dinner: '#D95B3A'
 }
 
 export function MealsPage() {

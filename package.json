@@ -1,38 +1,48 @@
 {
   "name": "openskylight",
   "version": "0.8.0",
-  "description": "OpenSkyLight — an open-source standalone family calendar display (Skylight Calendar clone)",
-  "main": "./out/main/index.js",
+  "description": "LAN-hosted family calendar display and parent administration service",
   "author": "Tyler",
   "license": "MIT",
   "private": true,
+  "engines": {
+    "node": "22.13.x",
+    "npm": ">=10 <12"
+  },
+  "overrides": {
+    "webworkify-webpack": "2.1.5"
+  },
   "scripts": {
-    "dev": "electron-vite dev",
-    "dev:windowed": "electron-vite dev -- --windowed",
+    "dev": "node scripts/dev-web.mjs",
+    "dev:server": "npm run build:server && npm run start:server",
+    "dev:kiosk": "vite --config kiosk.vite.config.ts",
     "dev:companion": "vite --config companion.vite.config.ts",
-    "build": "electron-vite build && npm run build:companion",
+    "build": "npm run build:server && npm run build:kiosk && npm run build:companion",
+    "build:server": "tsc -p tsconfig.server.json",
+    "build:kiosk": "vite build --config kiosk.vite.config.ts",
     "build:companion": "vite build --config companion.vite.config.ts",
-    "preview": "electron-vite preview",
-    "typecheck": "tsc --noEmit -p tsconfig.node.json && tsc --noEmit -p tsconfig.web.json",
-    "test": "node scripts/run-vitest.mjs run",
-    "test:watch": "node scripts/run-vitest.mjs",
-    "postinstall": "electron-builder install-app-deps",
-    "dist": "npm run build && electron-builder",
-    "release": "npm run build && electron-builder --publish always"
+    "start:server": "node out/server/index.js",
+    "typecheck": "tsc --noEmit -p tsconfig.server.json && tsc --noEmit -p tsconfig.web.json",
+    "test": "node ./node_modules/vitest/vitest.mjs run",
+    "test:watch": "node ./node_modules/vitest/vitest.mjs",
+    "test:admin-shell": "npm run build:companion && node scripts/e2e-admin-shell.mjs",
+    "test:phone-chores": "npm run build:companion && node scripts/e2e-phone-chores-rewards.mjs",
+    "test:phone-planning": "npm run build:companion && node scripts/e2e-phone-planning.mjs",
+    "test:phone-displays": "npm run build:companion && node scripts/e2e-phone-displays-diagnostics.mjs",
+    "test:kiosk-browser": "npm run build:kiosk && npm run build:server && node scripts/e2e-kiosk-browser.mjs",
+    "test:kiosk-connectivity": "npm run build:kiosk && npm run build:server && node scripts/e2e-kiosk-connectivity.mjs",
+    "test:operations": "node ./node_modules/vitest/vitest.mjs run tests/unit/operations.test.ts",
+    "test:multi-display": "npm run build:kiosk && npm run build:server && node scripts/e2e-multi-display.mjs"
   },
   "dependencies": {
     "@googleapis/calendar": "^15.0.0",
     "better-sqlite3": "^12.4.1",
-    "drizzle-orm": "^0.38.4",
-    "electron-updater": "^6.8.9",
+    "drizzle-orm": "^0.45.2",
     "fast-xml-parser": "^5.8.0",
-    "ffmpeg-static": "^5.3.0",
     "google-auth-library": "^10.7.0",
     "ical.js": "^2.2.1",
     "luxon": "^3.5.0",
-    "mpegts.js": "^1.8.0",
     "rrule": "^2.8.1",
-    "ws": "^8.21.0",
     "zod": "^3.24.1"
   },
   "devDependencies": {
@@ -45,12 +55,8 @@
     "@types/node": "^22.13.1",
     "@types/qrcode": "^1.5.6",
     "@types/react": "^19.0.8",
-    "@types/react-dom": "^19.0.3",
-    "@types/ws": "^8.18.1",
+    "@types/react-dom": "^19.0.8",
     "@vitejs/plugin-react": "^4.3.4",
-    "electron": "^34.2.0",
-    "electron-builder": "^25.1.8",
-    "electron-vite": "^3.0.0",
     "playwright-core": "^1.60.0",
     "qrcode": "^1.5.4",
     "react": "^19.0.0",
@@ -61,5 +67,9 @@
     "vite": "^6.1.0",
     "vitest": "^3.0.5",
     "zustand": "^5.0.3"
+  },
+  "allowScripts": {
+    "better-sqlite3@12.10.0": true,
+    "esbuild@0.25.12": true
   }
 }

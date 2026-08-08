@@ -59,14 +59,14 @@ export function textOn(hex: string): string {
   return 0.299 * r + 0.587 * g + 0.114 * b > 160 ? '#34302a' : '#ffffff'
 }
 
-export function PersonAvatar({ name, color, size = 'md' }: { name: string; color: string; size?: 'sm' | 'md' }) {
+export function PersonAvatar({ name, color, avatarUrl, size = 'md' }: { name: string; color: string; avatarUrl?: string | null; size?: 'sm' | 'md' }) {
   const cls = size === 'sm' ? 'h-6 w-6 text-[10px]' : 'h-9 w-9 text-sm'
   return (
     <span
       className={`flex ${cls} shrink-0 items-center justify-center rounded-full font-extrabold`}
       style={{ backgroundColor: color, color: textOn(color) }}
     >
-      {initials(name)}
+      {avatarUrl ? <img src={avatarUrl} alt="" className="h-full w-full rounded-full object-cover" /> : initials(name)}
     </span>
   )
 }
@@ -119,16 +119,19 @@ export function TextInput({
   onChange,
   placeholder,
   autoFocus,
-  inputMode
+  inputMode,
+  type = 'text'
 }: {
   value: string
   onChange: (v: string) => void
   placeholder?: string
   autoFocus?: boolean
   inputMode?: 'text' | 'numeric'
+  type?: 'text' | 'password'
 }) {
   return (
     <input
+      type={type}
       value={value}
       onChange={(e) => onChange(e.target.value)}
       placeholder={placeholder}

@@ -2,7 +2,7 @@ import { create } from 'zustand'
 
 /**
  * Whether a fullscreen kiosk layer (sleep or screensaver) is covering the UI.
- * Expensive tiles (camera streams) pause themselves while covered.
+ * Fullscreen layers can pause expensive display work while covered.
  */
 interface KioskState {
   covered: boolean

@@ -1,12 +1,9 @@
 import { useEffect } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { ipcInvoke } from './client'
+import { ipcInvoke, subscribePush } from './client'
 import type {
   CalendarCreateInput,
   CalendarUpdateInput,
-  EventCreateInput,
-  EventDeleteInput,
-  EventUpdateInput,
   PersonCreateInput,
   PersonUpdateInput,
   AppSettings
@@ -59,19 +56,6 @@ function useInvalidatingMutation<TInput, TOutput>(
     },
     onError: (err: Error) => pushToast(err.message)
   })
-}
-
-export function useEventMutations() {
-  const create = useInvalidatingMutation((input: EventCreateInput) => ipcInvoke('events:create', input), [
-    ['occurrences']
-  ])
-  const update = useInvalidatingMutation((input: EventUpdateInput) => ipcInvoke('events:update', input), [
-    ['occurrences']
-  ])
-  const remove = useInvalidatingMutation((input: EventDeleteInput) => ipcInvoke('events:delete', input), [
-    ['occurrences']
-  ])
-  return { create, update, remove }
 }
 
 export function usePeopleMutations() {
@@ -323,9 +307,8 @@ export function useCompanionMutations() {
 /** Refetch when the main process announces data changes (sync engine, other windows). */
 export function usePushInvalidation(): void {
   const queryClient = useQueryClient()
-  const pushToast = useToasts((s) => s.push)
   useEffect(() => {
-    const offData = window.osl.on('push:dataChanged', (data) => {
+    const offData = subscribePush('push:dataChanged', (data) => {
       const domain = (data as { domain?: string })?.domain
       if (domain === 'events') void queryClient.invalidateQueries({ queryKey: ['occurrences'] })
       else if (domain) void queryClient.invalidateQueries({ queryKey: [domain] })
@@ -334,19 +317,26 @@ export function usePushInvalidation(): void {
         // chore day views and star balances key off their own roots
         void queryClient.invalidateQueries({ queryKey: ['choresDay'] })
         void queryClient.invalidateQueries({ queryKey: ['balances'] })
+        // A display can receive this notification while its view is changing.
+        // Refetch active queries explicitly so a completed chore converges on
+        // every wall display even when React Query has just marked a query
+        // inactive during that transition.
+        void queryClient.refetchQueries({ queryKey: ['choresDay'], type: 'active' })
+        void queryClient.refetchQueries({ queryKey: ['balances'], type: 'active' })
       }
     })
-    const offStatus = window.osl.on('push:syncStatus', () => {
+    const offStatus = subscribePush('push:syncStatus', () => {
       void queryClient.invalidateQueries({ queryKey: ['syncStatus'] })
     })
-    const offConflict = window.osl.on('push:syncConflict', (data) => {
-      const title = (data as { title?: string })?.title ?? 'An event'
-      pushToast(`"${title}" was changed elsewhere — showing the latest version`)
+    // The stream server explicitly asks clients to revalidate after every
+    // (re)connection so a missed event never leaves a kiosk stale.
+    const offReconnect = subscribePush('push:streamRevalidated', () => {
+      void queryClient.invalidateQueries()
     })
     return () => {
       offData()
       offStatus()
-      offConflict()
+      offReconnect()
     }
-  }, [queryClient, pushToast])
+  }, [queryClient])
 }

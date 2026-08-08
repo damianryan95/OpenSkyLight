@@ -26,6 +26,7 @@ export function weatherIcon(code: number, isDay: boolean): Icon {
   if (code >= 95) return StormIcon
   return CloudIcon
 }
+export function weatherWords(code: number): string { return code === 0 ? 'Clear' : code <= 2 ? 'Partly cloudy' : code === 3 ? 'Overcast' : code === 45 || code === 48 ? 'Foggy' : code >= 95 ? 'Stormy' : code >= 71 && code <= 86 ? 'Snowy' : code >= 51 && code <= 82 ? 'Rainy' : 'Cloudy' }
 
 export function WeatherButton() {
   const { data: weather } = useWeather()
@@ -42,11 +43,11 @@ export function WeatherButton() {
         aria-label="Weather forecast"
       >
         <Icon size={34} className="text-ember-deep" />
-        <span className="font-display text-3xl leading-none">{weather.temperature}°</span>
+        <span><span className="block font-display text-3xl leading-none">{weather.temperature}°</span><span className="block max-w-28 truncate text-xs font-extrabold text-ink-faint">{weather.description}</span></span>
         {/* hidden on narrow displays — the tap-for-forecast dialog still has all 5 days */}
         {weather.daily.length > 1 && (
           <span className="ml-1 hidden items-center gap-2.5 border-l border-ink-faint/30 pl-3 min-[1500px]:flex">
-            {weather.daily.slice(1, 3).map((d) => {
+            {weather.daily.slice(1, 5).map((d) => {
               const DayIcon = weatherIcon(d.code, true)
               return (
                 <span key={d.date} className="flex flex-col items-center gap-0.5">
@@ -74,6 +75,7 @@ export function WeatherButton() {
                   {i === 0 ? 'Today' : DateTime.fromISO(d.date).toFormat('ccc')}
                 </span>
                 <DayIcon size={30} className="text-ember-deep" />
+                <span className="text-[11px] font-bold text-ink-soft">{weatherWords(d.code)}</span>
                 <span className="text-lg font-bold">{d.high}°</span>
                 <span className="text-base font-bold text-ink-faint">{d.low}°</span>
                 {d.precipProb !== null && d.precipProb > 20 && (

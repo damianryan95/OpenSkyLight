@@ -4,7 +4,7 @@ import { agendaRange, dayRange, monthGridRange, weekRange, type DateRange } from
 import type { CalendarDto, OccurrenceDto, PersonDto } from '@shared/types'
 import { useCalendars, useOccurrences, usePeople, useSettings } from '../../api/hooks'
 import { useUi, ZONE } from '../../stores/uiStore'
-import { visibleWithFilters } from '../../lib/colors'
+import { occurrenceIsVisible } from '@shared/viewingContext'
 
 export function useWeekStartsOn(): 0 | 1 {
   const { data: settings } = useSettings()
@@ -41,12 +41,12 @@ export function useCalendarData(range: DateRange): CalendarData {
   const { data: occurrences, isLoading } = useOccurrences(range)
   const { data: people } = usePeople()
   const { data: calendars } = useCalendars()
-  const hiddenPeople = useUi((s) => s.hiddenPeople)
+  const viewingContext = useUi((s) => s.viewingContext)
 
   return useMemo(() => {
     const peopleById = new Map((people ?? []).map((p) => [p.id, p]))
     const calendarsById = new Map((calendars ?? []).map((c) => [c.id, c]))
-    const visible = (occurrences ?? []).filter((o) => visibleWithFilters(o, hiddenPeople))
+    const visible = (occurrences ?? []).filter((o) => occurrenceIsVisible(viewingContext, o))
 
     const byDay = new Map<string, OccurrenceDto[]>()
     for (const occ of visible) {
@@ -68,5 +68,5 @@ export function useCalendarData(range: DateRange): CalendarData {
       arr.sort((a, b) => (a.allDay === b.allDay ? (a.start < b.start ? -1 : 1) : a.allDay ? -1 : 1))
     }
     return { occurrences: visible, byDay, peopleById, calendarsById, isLoading }
-  }, [occurrences, people, calendars, hiddenPeople, isLoading])
+  }, [occurrences, people, calendars, viewingContext, isLoading])
 }

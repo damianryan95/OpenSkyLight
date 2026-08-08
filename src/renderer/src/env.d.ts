@@ -2,7 +2,7 @@
 
 declare global {
   interface Window {
-    osl: {
+    osl?: {
       invoke(channel: string, payload: unknown): Promise<unknown>
       on(channel: string, callback: (data: unknown) => void): () => void
     }

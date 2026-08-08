@@ -2,7 +2,7 @@ import type { IpcChannel } from './contract'
 
 /**
  * The ONLY channels the companion HTTP API will dispatch. Everything else
- * (settings, auth, google, camera, screensaver, updater…) returns 404 even
+ * (settings, auth, google, screensaver, updater…) returns 404 even
  * with a valid bearer token — a paired phone edits family data, it does not
  * administer the kiosk.
  */

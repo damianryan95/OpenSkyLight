@@ -16,34 +16,34 @@ export interface TileSpec {
   allowMultiple: boolean
   /** The only config keys this tile type may carry — the single source of
    * truth that sanitizeLayout enforces (per-type, so a list tile can never
-   * smuggle a cameraId, and forgetting a key here fails visibly in tests). */
+   * carry unrelated configuration, and forgetting a key here fails visibly in tests). */
   configKeys: (keyof HomeTileConfig)[]
 }
 
 export const TILE_SPECS: Record<HomeTileType, TileSpec> = {
   todayEvents: { minW: 3, minH: 3, defaultW: 4, defaultH: 6, allowMultiple: false, configKeys: [] },
-  weekAgenda: { minW: 4, minH: 3, defaultW: 5, defaultH: 4, allowMultiple: false, configKeys: [] },
-  weather: { minW: 2, minH: 2, defaultW: 3, defaultH: 2, allowMultiple: false, configKeys: [] },
-  choresProgress: { minW: 3, minH: 2, defaultW: 3, defaultH: 2, allowMultiple: false, configKeys: [] },
-  starBalances: { minW: 2, minH: 2, defaultW: 2, defaultH: 2, allowMultiple: false, configKeys: [] },
+  weekAgenda: { minW: 3, minH: 2, defaultW: 3, defaultH: 3, allowMultiple: false, configKeys: [] },
+  weather: { minW: 2, minH: 1, defaultW: 3, defaultH: 2, allowMultiple: false, configKeys: [] },
+  choresProgress: { minW: 3, minH: 3, defaultW: 5, defaultH: 6, allowMultiple: false, configKeys: [] },
+  familyChores: { minW: 4, minH: 3, defaultW: 6, defaultH: 6, allowMultiple: false, configKeys: [] },
+  starBalances: { minW: 1, minH: 1, defaultW: 2, defaultH: 2, allowMultiple: false, configKeys: [] },
+  familyRewards: { minW: 4, minH: 3, defaultW: 6, defaultH: 6, allowMultiple: false, configKeys: [] },
   list: { minW: 2, minH: 3, defaultW: 3, defaultH: 4, allowMultiple: true, configKeys: ['listId'] },
   meals: { minW: 2, minH: 2, defaultW: 3, defaultH: 2, allowMultiple: false, configKeys: [] },
   clock: { minW: 2, minH: 2, defaultW: 2, defaultH: 2, allowMultiple: false, configKeys: [] },
   photo: { minW: 2, minH: 2, defaultW: 3, defaultH: 4, allowMultiple: true, configKeys: [] },
   news: { minW: 3, minH: 2, defaultW: 4, defaultH: 3, allowMultiple: true, configKeys: ['feedId'] },
-  camera: { minW: 3, minH: 2, defaultW: 4, defaultH: 3, allowMultiple: true, configKeys: ['cameraId'] },
-  birdnet: { minW: 3, minH: 2, defaultW: 4, defaultH: 4, allowMultiple: true, configKeys: ['birdnetUrl'] },
   timer: { minW: 3, minH: 2, defaultW: 4, defaultH: 3, allowMultiple: false, configKeys: [] }
 }
 
 /** Tiles the full 12x6 grid with no gaps. Clock/weather tiles are NOT placed by
  * default — the header already shows both — but stay in the Add Tile sheet. */
 export const DEFAULT_HOME_LAYOUT: HomeTile[] = [
-  { id: 'default-todayEvents', type: 'todayEvents', x: 0, y: 0, w: 4, h: 6 },
-  { id: 'default-weekAgenda', type: 'weekAgenda', x: 4, y: 0, w: 5, h: 6 },
-  { id: 'default-meals', type: 'meals', x: 9, y: 0, w: 3, h: 2 },
-  { id: 'default-choresProgress', type: 'choresProgress', x: 9, y: 2, w: 3, h: 2 },
-  { id: 'default-starBalances', type: 'starBalances', x: 9, y: 4, w: 3, h: 2 }
+  { id: 'default-todayEvents', type: 'todayEvents', x: 0, y: 0, w: 3, h: 6 },
+  { id: 'default-choresProgress', type: 'choresProgress', x: 3, y: 0, w: 5, h: 6 },
+  { id: 'default-weekAgenda', type: 'weekAgenda', x: 8, y: 0, w: 4, h: 3 },
+  { id: 'default-meals', type: 'meals', x: 8, y: 3, w: 2, h: 3 },
+  { id: 'default-starBalances', type: 'starBalances', x: 10, y: 3, w: 2, h: 3 }
 ]
 
 export interface Rect {
@@ -123,7 +123,6 @@ export function sanitizeLayout(raw: unknown): HomeTile[] {
       const rawConfig = t.config as Record<string, unknown>
       for (const key of spec.configKeys) {
         const value = rawConfig[key]
-        // 200 (not 80) so a birdnet URL fits; MUST match homeTileSchema's max
         if (typeof value === 'string' && value.length >= 1 && value.length <= 200) {
           config = { ...config, [key]: value }
         }

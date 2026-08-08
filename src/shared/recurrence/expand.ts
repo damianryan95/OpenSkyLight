@@ -1,6 +1,7 @@
 import { RRule } from 'rrule'
 import { DateTime } from 'luxon'
 import { isoUtc } from '../dates'
+import { normalizeTimeZone } from '../timezone'
 
 /**
  * Pure recurrence expansion.
@@ -74,8 +75,9 @@ interface Duration {
 }
 
 function eventDuration(master: MasterEventLike): Duration {
-  const start = DateTime.fromISO(master.startAt, { zone: 'utc' }).setZone(master.tz)
-  const end = DateTime.fromISO(master.endAt, { zone: 'utc' }).setZone(master.tz)
+  const zone = normalizeTimeZone(master.tz)
+  const start = DateTime.fromISO(master.startAt, { zone: 'utc' }).setZone(zone)
+  const end = DateTime.fromISO(master.endAt, { zone: 'utc' }).setZone(zone)
   if (master.allDay) {
     return { allDayDays: Math.max(1, Math.round(end.diff(start, 'days').days)), millis: 0 }
   }
@@ -92,7 +94,7 @@ export function occurrenceTimes(
   occurrenceStartIso: string
 ): { start: string; end: string } {
   const dur = eventDuration(master)
-  const occStart = DateTime.fromISO(occurrenceStartIso, { zone: 'utc' }).setZone(master.tz)
+  const occStart = DateTime.fromISO(occurrenceStartIso, { zone: 'utc' }).setZone(normalizeTimeZone(master.tz))
   return { start: isoUtc(occStart), end: isoUtc(occurrenceEnd(occStart, dur)) }
 }
 
@@ -106,7 +108,7 @@ export function expandOccurrences(
   windowStartIso: string,
   windowEndIso: string
 ): ExpandedOccurrence[] {
-  const zone = master.tz || 'utc'
+  const zone = normalizeTimeZone(master.tz)
   const dur = eventDuration(master)
   const windowStart = DateTime.fromISO(windowStartIso, { zone: 'utc' })
   const windowEnd = DateTime.fromISO(windowEndIso, { zone: 'utc' })

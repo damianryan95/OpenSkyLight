@@ -6,6 +6,7 @@ import { BigButton, Dialog, FieldLabel, SegmentedControl } from '../../component
 import { OskInput } from '../../components/Osk'
 import { CheckIcon, PlusIcon, XIcon } from '../../components/icons'
 import { textOn } from '../../lib/format'
+import { isDisplayClient } from '../../lib/clientMode'
 
 function AddItemRow({ listId }: { listId: string }) {
   const [text, setText] = useState('')
@@ -30,49 +31,54 @@ function AddItemRow({ listId }: { listId: string }) {
   )
 }
 
-function ListCard({ list, onEdit }: { list: ListDto; onEdit: () => void }) {
+function ListCard({ list, readOnly }: { list: ListDto; readOnly: boolean }) {
   const mutations = useListMutations()
   const checkedCount = list.items.filter((i) => i.checked).length
   return (
     <div className="flex max-h-full w-80 shrink-0 flex-col rounded-card bg-card p-4 shadow-card">
-      <button type="button" onClick={onEdit} className="pressable mb-2 flex items-center gap-2.5 text-left">
+      <div className="mb-2 flex items-center gap-2.5 text-left">
         <span className="h-5 w-5 rounded-full" style={{ backgroundColor: list.color }} />
         <span className="min-w-0 flex-1 truncate font-display text-2xl font-semibold">{list.name}</span>
         <span className="text-sm font-extrabold text-ink-faint">
           {list.items.length - checkedCount}
         </span>
-      </button>
+      </div>
       <div className="flex min-h-0 flex-1 flex-col gap-1 overflow-y-auto">
         {list.items.map((item) => (
           <div key={item.id} className="group flex items-center gap-2.5 rounded-xl px-1 py-1 hover:bg-paper-deep/40">
-            <button
-              type="button"
-              onClick={() => mutations.toggleItem.mutate({ id: item.id })}
-              className="pressable flex h-9 w-9 shrink-0 items-center justify-center rounded-full border-[2.5px]"
+            {readOnly ? <span
+              className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full border-[2.5px]"
               style={{
                 borderColor: list.color,
                 backgroundColor: item.checked ? list.color : 'transparent'
               }}
+            >
+              {item.checked && <CheckIcon size={18} style={{ color: textOn(list.color) }} />}
+            </span> : <button
+              type="button"
+              onClick={() => mutations.toggleItem.mutate({ id: item.id })}
+              className="pressable flex h-9 w-9 shrink-0 items-center justify-center rounded-full border-[2.5px]"
+              style={{ borderColor: list.color, backgroundColor: item.checked ? list.color : 'transparent' }}
               aria-label={item.checked ? 'Uncheck' : 'Check'}
             >
               {item.checked && <CheckIcon size={18} style={{ color: textOn(list.color) }} />}
-            </button>
+            </button>}
             <span className={`min-w-0 flex-1 text-lg font-semibold ${item.checked ? 'text-ink-faint line-through' : ''}`}>
               {item.text}
             </span>
-            <button
+            {!readOnly && <button
               type="button"
               onClick={() => mutations.removeItem.mutate({ id: item.id })}
               className="pressable flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-ink-faint opacity-0 transition-opacity group-hover:opacity-100 hover:bg-paper-deep"
               aria-label="Delete item"
             >
               <XIcon size={16} />
-            </button>
+            </button>}
           </div>
         ))}
         {list.items.length === 0 && <p className="px-1 py-2 text-base font-semibold text-ink-faint">Nothing here yet</p>}
       </div>
-      {checkedCount > 0 && (
+      {!readOnly && checkedCount > 0 && (
         <button
           type="button"
           onClick={() => mutations.clearChecked.mutate({ listId: list.id })}
@@ -81,7 +87,7 @@ function ListCard({ list, onEdit }: { list: ListDto; onEdit: () => void }) {
           Clear {checkedCount} done
         </button>
       )}
-      <AddItemRow listId={list.id} />
+      {!readOnly && <AddItemRow listId={list.id} />}
     </div>
   )
 }
@@ -93,6 +99,7 @@ export function ListsView() {
   const [name, setName] = useState('')
   const [color, setColor] = useState<string>(PERSON_COLORS[4])
   const [kind, setKind] = useState<ListKind>('grocery')
+  const readOnly = isDisplayClient()
 
   const openEditor = (l: ListDto | 'new'): void => {
     setEditing(l)
@@ -112,10 +119,10 @@ export function ListsView() {
     <div className="flex h-full items-start gap-4 overflow-x-auto px-6 pb-6">
       {lists.map((list, i) => (
         <div key={list.id} className="animate-rise flex max-h-full" style={{ animationDelay: `${i * 60}ms` }}>
-          <ListCard list={list} onEdit={() => openEditor(list)} />
+          <ListCard list={list} readOnly={readOnly} />
         </div>
       ))}
-      <button
+      {!readOnly && <button
         type="button"
         onClick={() => openEditor('new')}
         className="animate-rise pressable flex h-44 w-64 shrink-0 flex-col items-center justify-center gap-2 rounded-card border-2 border-dashed border-line text-ink-faint hover:bg-paper-deep/40"
@@ -123,9 +130,9 @@ export function ListsView() {
       >
         <PlusIcon size={28} />
         <span className="text-lg font-bold">New list</span>
-      </button>
+      </button>}
 
-      <Dialog open={editing !== null} onClose={() => setEditing(null)} title={editing === 'new' ? 'New list' : 'Edit list'}>
+      {!readOnly && <Dialog open={editing !== null} onClose={() => setEditing(null)} title={editing === 'new' ? 'New list' : 'Edit list'}>
         <div className="flex flex-col gap-4">
           <div>
             <FieldLabel>Name</FieldLabel>
@@ -180,7 +187,7 @@ export function ListsView() {
             </BigButton>
           </div>
         </div>
-      </Dialog>
+      </Dialog>}
     </div>
   )
 }

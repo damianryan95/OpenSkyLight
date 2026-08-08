@@ -6,12 +6,14 @@ export interface PersonDto {
   color: string
   role: PersonRole
   sortOrder: number
+  avatarUrl: string | null
 }
 
 export interface PersonCreateInput {
   name: string
   color: string
   role: PersonRole
+  avatarData?: string | null
 }
 
 export interface PersonUpdateInput {
@@ -20,6 +22,7 @@ export interface PersonUpdateInput {
   color?: string
   role?: PersonRole
   sortOrder?: number
+  avatarData?: string | null
 }
 
 export type CalendarProvider = 'local' | 'google' | 'ics'
@@ -102,48 +105,6 @@ export interface OccurrenceDto {
   personIds: string[]
 }
 
-export interface EventPatch {
-  title?: string
-  description?: string | null
-  location?: string | null
-  start?: string
-  end?: string
-  tz?: string
-  allDay?: boolean
-  personIds?: string[]
-  /** undefined = leave unchanged; null = remove recurrence */
-  recurrence?: RecurrenceInput | null
-}
-
-export interface EventCreateInput {
-  calendarId: string
-  title: string
-  description?: string | null
-  location?: string | null
-  start: string
-  end: string
-  tz: string
-  allDay: boolean
-  personIds: string[]
-  recurrence?: RecurrenceInput | null
-}
-
-export type EditScope = 'this' | 'following' | 'all'
-
-export interface EventUpdateInput {
-  id: string
-  scope: EditScope
-  /** Required when scope is 'this' or 'following' on a recurring event */
-  occurrenceStart?: string
-  changes: EventPatch
-}
-
-export interface EventDeleteInput {
-  id: string
-  scope: EditScope
-  occurrenceStart?: string
-}
-
 export type CalendarViewKind = 'home' | 'day' | 'week' | 'month' | 'agenda' | 'chores' | 'lists'
 
 export type HomeTileType =
@@ -151,14 +112,14 @@ export type HomeTileType =
   | 'weekAgenda'
   | 'weather'
   | 'choresProgress'
+  | 'familyChores'
   | 'starBalances'
+  | 'familyRewards'
   | 'list'
   | 'meals'
   | 'clock'
   | 'photo'
   | 'news'
-  | 'camera'
-  | 'birdnet'
   | 'timer'
 
 export interface HomeTileConfig {
@@ -166,15 +127,6 @@ export interface HomeTileConfig {
   listId?: string
   /** 'news' tiles: which preset feed (see shared/rss.ts) */
   feedId?: string
-  /** 'camera' tiles: which configured camera to stream */
-  cameraId?: string
-  /** 'birdnet' tiles: the BirdNET-Go base URL on the LAN */
-  birdnetUrl?: string
-}
-
-export interface CameraDto {
-  id: string
-  name: string
 }
 
 export interface HomeTile {
@@ -205,9 +157,9 @@ export interface ListDto {
   items: ListItemDto[]
 }
 
-export type MealSlotKind = 'breakfast' | 'lunch' | 'dinner' | 'snack'
+export type MealSlotKind = 'breakfast' | 'lunch' | 'dinner'
 
-export const MEAL_SLOTS: MealSlotKind[] = ['breakfast', 'lunch', 'dinner', 'snack']
+export const MEAL_SLOTS: MealSlotKind[] = ['breakfast', 'lunch', 'dinner']
 
 export interface MealSlotDto {
   /** YYYY-MM-DD */
@@ -235,6 +187,7 @@ export interface ChoreDto {
 
 export interface ChoreCreateInput {
   title: string
+  icon?: string | null
   personId: string
   starsValue: number
   recurrence?: RecurrenceInput | null
@@ -245,6 +198,7 @@ export interface ChoreCreateInput {
 export interface ChoreUpdateInput {
   id: string
   title?: string
+  icon?: string | null
   personId?: string
   starsValue?: number
   recurrence?: RecurrenceInput | null
@@ -274,6 +228,20 @@ export interface RewardDto {
   icon: string | null
   costStars: number
   active: boolean
+}
+
+export interface RewardCreateInput {
+  title: string
+  icon?: string | null
+  costStars: number
+}
+
+export interface RewardUpdateInput {
+  id: string
+  title?: string
+  icon?: string | null
+  costStars?: number
+  active?: boolean
 }
 
 export interface RedemptionDto {

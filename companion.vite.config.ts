@@ -4,11 +4,13 @@ import tailwindcss from '@tailwindcss/vite'
 import { resolve } from 'path'
 
 /**
- * The companion mobile web app — built separately from the electron-vite
- * bundles and served on the LAN by the main process from out/companion.
+ * Parent administration web app served by the household server at /admin/.
  */
 export default defineConfig({
   root: resolve(__dirname, 'src/companion'),
+  // The household server mounts this independent SPA below /admin/; keeping
+  // assets under that prefix prevents them colliding with kiosk /assets.
+  base: '/admin/',
   plugins: [react(), tailwindcss()],
   resolve: {
     alias: { '@shared': resolve(__dirname, 'src/shared') }
@@ -18,7 +20,6 @@ export default defineConfig({
     emptyOutDir: true
   },
   server: {
-    // hot-reload UI work against a running kiosk: npm run dev:companion
-    proxy: { '/api': 'http://localhost:8420' }
+    proxy: { '/api': 'http://localhost:3000' }
   }
 })

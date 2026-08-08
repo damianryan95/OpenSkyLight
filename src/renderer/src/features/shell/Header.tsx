@@ -3,10 +3,12 @@ import { DateTime } from 'luxon'
 import { usePeople, useSettings } from '../../api/hooks'
 import { useUi, ZONE } from '../../stores/uiStore'
 import { SegmentedControl, IconButton } from '../../components/ui'
-import { ChevronLeftIcon, ChevronRightIcon, GearIcon, PlusIcon } from '../../components/icons'
+import { ChevronLeftIcon, ChevronRightIcon, GearIcon } from '../../components/icons'
 import { WeatherButton } from '../weather/WeatherHeader'
 import { initials, textOn } from '../../lib/format'
+import { inViewingContext } from '@shared/viewingContext'
 import type { CalendarViewKind } from '@shared/types'
+import { isDisplayClient } from '../../lib/clientMode'
 
 function useNow(): DateTime {
   const [now, setNow] = useState(() => DateTime.now().setZone(ZONE))
@@ -41,11 +43,13 @@ export function Header() {
   const focusedDate = useUi((s) => s.focusedDate)
   const step = useUi((s) => s.step)
   const goToday = useUi((s) => s.goToday)
-  const hiddenPeople = useUi((s) => s.hiddenPeople)
-  const togglePerson = useUi((s) => s.togglePerson)
+  const viewingContext = useUi((s) => s.viewingContext)
+  const selectFamily = useUi((s) => s.selectFamily)
+  const selectPerson = useUi((s) => s.selectPerson)
   const setSettingsOpen = useUi((s) => s.setSettingsOpen)
   const weekStartsOn = settings?.weekStartsOn ?? 0
   const timeFormat = settings?.timeFormat ?? '12h'
+  const display = isDisplayClient()
   return (
     <header className="flex items-center gap-2 px-4 pt-5 pb-4 min-[1500px]:gap-3 min-[1500px]:px-5">
       {/* Today + a big clock (the header is the only clock since the home
@@ -77,24 +81,37 @@ export function Header() {
 
       <div className="flex-1" />
 
-      {/* person filter: compact avatar circles, never clipped (overlap when the family is large) */}
+      {/* Viewing context is one explicit choice, never a collection of hidden people. */}
       {people.length > 0 && (
         <div className={`flex shrink-0 items-center ${people.length >= 4 ? '-space-x-2' : 'gap-1.5'}`}>
+          <button
+            type="button"
+            aria-label="Show Family view"
+            aria-pressed={viewingContext === 'family'}
+            title="Family"
+            onClick={selectFamily}
+            className={`pressable z-10 min-h-12 rounded-full px-3 text-sm font-extrabold ring-2 ring-paper transition-all ${
+              viewingContext === 'family' ? 'bg-ink text-paper shadow-card' : 'bg-paper-deep text-ink-soft'
+            }`}
+          >
+            Family
+          </button>
           {people.map((p) => {
-            const hidden = hiddenPeople.includes(p.id)
+            const selected = inViewingContext(viewingContext, p.id)
             return (
               <button
                 key={p.id}
                 type="button"
-                aria-label={`${hidden ? 'Show' : 'Hide'} ${p.name}`}
+                aria-label={`Show ${p.name}'s view`}
+                aria-pressed={selected}
                 title={p.name}
-                onClick={() => togglePerson(p.id)}
-                className={`pressable flex h-11 w-11 shrink-0 items-center justify-center rounded-full text-sm font-extrabold ring-2 ring-paper transition-all ${
-                  hidden ? 'opacity-35 grayscale' : 'shadow-card'
+                onClick={() => selectPerson(p.id)}
+                className={`pressable flex h-12 w-12 shrink-0 items-center justify-center rounded-full text-sm font-extrabold ring-2 ring-paper transition-all ${
+                  selected ? 'z-10 scale-110 shadow-card ring-ember' : 'opacity-70'
                 }`}
                 style={{ backgroundColor: p.color, color: textOn(p.color) }}
               >
-                {initials(p.name)}
+                {p.avatarUrl ? <img src={p.avatarUrl} alt="" className="h-full w-full rounded-full object-cover" /> : initials(p.name)}
               </button>
             )
           })}
@@ -110,7 +127,7 @@ export function Header() {
           <button
             type="button"
             onClick={goToday}
-            className="pressable min-w-16 rounded-xl px-2 py-2 text-center text-base font-extrabold text-ink min-[1500px]:min-w-24"
+            className="pressable min-h-12 min-w-16 rounded-xl px-2 py-2 text-center text-base font-extrabold text-ink min-[1500px]:min-w-24"
           >
             {periodLabel(view, focusedDate, weekStartsOn)}
           </button>
@@ -134,23 +151,9 @@ export function Header() {
         ]}
       />
 
-      <IconButton label="Settings" onClick={() => setSettingsOpen(true)}>
+      {!display && <IconButton label="Settings" onClick={() => setSettingsOpen(true)}>
         <GearIcon size={26} />
-      </IconButton>
+      </IconButton>}
     </header>
-  )
-}
-
-export function Fab() {
-  const openCreate = useUi((s) => s.openCreate)
-  return (
-    <button
-      type="button"
-      aria-label="Add event"
-      onClick={() => openCreate()}
-      className="pressable fixed right-7 bottom-7 z-30 flex h-18 w-18 items-center justify-center rounded-full bg-ember text-white shadow-float hover:bg-ember-deep"
-    >
-      <PlusIcon size={32} />
-    </button>
   )
 }

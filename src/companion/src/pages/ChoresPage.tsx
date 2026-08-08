@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { DateTime } from 'luxon'
 import type { ChoreDto, ChoreRoutine, PersonDto } from '@shared/types'
+import { choreIconSymbol } from '@shared/choreIcons'
 import { useBalances, useChoreMutations, useChores, useChoresDay, usePeople } from '../api/hooks'
 import { Card, CheckCircle, EmptyNote, GhostButton, PersonAvatar, PrimaryButton, TextInput } from '../components/ui'
 
@@ -38,6 +39,7 @@ export function ChoresPage() {
               </div>
               {theirs.map((chore) => (
                 <div key={chore.choreId} className="flex items-center border-b border-line/60 last:border-0">
+                  <span className="mr-2 text-xl" aria-hidden="true">{choreIconSymbol(chore.icon)}</span>
                   <CheckCircle
                     checked={chore.completed}
                     color={person.color}
