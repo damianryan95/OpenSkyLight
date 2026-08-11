@@ -1,6 +1,6 @@
 # PE07 - Build the chore celebration renderer
 
-Status: planned  
+Status: in progress  
 Depends on: PE01, PE02, PE05
 
 ## Context

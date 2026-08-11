@@ -1,6 +1,6 @@
 # PE01 - Validate the personalization experience
 
-Status: ready  
+Status: done
 Depends on: none
 
 ## Context
@@ -16,7 +16,8 @@ Prototype the phone theme gallery and celebration upload/preview flow. Use
 fixture data and lightweight local placeholder or household-supplied artwork;
 do not add persistence or production routes.
 
-Record the resulting interaction decisions and reviewed screenshots in docs.
+Record the resulting interaction decisions and reviewed screenshots in
+`docs/personalization-prototype.md`.
 Resolve safe-area, overlay duration, queue-summary, theme-transition, and loading
 fallback behavior so later tickets do not invent incompatible behavior.
 

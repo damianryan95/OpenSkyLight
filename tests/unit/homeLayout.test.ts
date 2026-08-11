@@ -101,6 +101,10 @@ describe('sanitizeLayout', () => {
     expect(result[0]).toMatchObject({ type: 'starBalances', w: 1, h: 1 })
     expect(result[1]).toMatchObject({ type: 'familyRewards', w: 4, h: 3 })
   })
+  it('allows the timer tile to use a compact two-by-two space', () => {
+    const [tile] = sanitizeLayout([{ id: 'timer', type: 'timer', x: 0, y: 0, w: 1, h: 1 }])
+    expect(tile).toMatchObject({ type: 'timer', w: 2, h: 2 })
+  })
   it('relocates overlapping tiles deterministically', () => {
     const result = sanitizeLayout([
       { id: 'a', type: 'clock', x: 0, y: 0, w: 2, h: 2 },

@@ -3,11 +3,23 @@ import { DateTime } from 'luxon'
 import type { CalendarViewKind } from '@shared/types'
 import { personContext, type ViewingContext } from '@shared/viewingContext'
 
-export const ZONE = Intl.DateTimeFormat().resolvedOptions().timeZone
+/**
+ * The kiosk's calendar must follow the household clock, rather than the
+ * timezone configured on the display device.  A Pi image commonly defaults to
+ * UTC, which otherwise makes it submit yesterday's chore date after local
+ * midnight.
+ */
+export let ZONE = Intl.DateTimeFormat().resolvedOptions().timeZone
+
+export function setHouseholdZone(zone: string): void {
+  ZONE = zone
+}
 
 interface UiState {
   view: CalendarViewKind
-  /** YYYY-MM-DD in the device zone */
+  /** The timezone currently supplied by the authenticated household server. */
+  timezone: string
+  /** YYYY-MM-DD in the current household timezone. */
   focusedDate: string
   /** Ephemeral by design: every fresh kiosk launch begins in Family. */
   viewingContext: ViewingContext
@@ -20,12 +32,14 @@ interface UiState {
   selectFamily(): void
   selectPerson(id: string): void
   setSettingsOpen(open: boolean): void
+  setHouseholdClock(zone: string, date: string): void
 }
 
 const today = (): string => DateTime.now().setZone(ZONE).toISODate()!
 
 export const useUi = create<UiState>((set, get) => ({
   view: 'home',
+  timezone: ZONE,
   focusedDate: today(),
   viewingContext: 'family',
   settingsOpen: false,
@@ -47,5 +61,9 @@ export const useUi = create<UiState>((set, get) => ({
   },
   selectFamily: () => set({ viewingContext: 'family' }),
   selectPerson: (id) => set({ viewingContext: personContext(id) }),
-  setSettingsOpen: (settingsOpen) => set({ settingsOpen })
+  setSettingsOpen: (settingsOpen) => set({ settingsOpen }),
+  setHouseholdClock: (zone, date) => {
+    setHouseholdZone(zone)
+    set({ timezone: zone, focusedDate: date })
+  }
 }))

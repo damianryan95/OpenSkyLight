@@ -1,6 +1,6 @@
 # PE02 - Add person personalization contracts and persistence
 
-Status: planned  
+Status: done
 Depends on: PE01
 
 ## Context

@@ -25,6 +25,7 @@ export function ChoresRewardsAdminPage() {
   const createChores = useMutation({ mutationFn: (bodies: ChoreInput[]) => Promise.all(bodies.map((body) => parentMutation('/api/v1/chores', 'POST', body))), onSuccess: invalidate })
   const [showChore, setShowChore] = useState(false); const [showReward, setShowReward] = useState(false); const [showCorrection, setShowCorrection] = useState(false); const [showStars, setShowStars] = useState(false)
   const [editingChore, setEditingChore] = useState<Chore | null>(null)
+  const [starNotice, setStarNotice] = useState<string | null>(null)
   const children = (people.data?.people ?? []).filter((person) => person.role === 'child')
   const error = request.error instanceof Error ? request.error.message : createChores.error instanceof Error ? createChores.error.message : null
   return <div className="flex flex-col gap-4">
@@ -32,7 +33,7 @@ export function ChoresRewardsAdminPage() {
     <AdminSection title="Chores" action="Add chore" onAction={() => setShowChore(true)}>
       {showChore && <ChoreForm people={children} onCancel={() => setShowChore(false)} onSave={(bodies) => createChores.mutate(bodies, { onSuccess: () => setShowChore(false) })} />}
       {editingChore && <ChoreForm initial={editingChore} people={children} onCancel={() => setEditingChore(null)} onSave={([body]) => { request.mutate({ path: `/api/v1/chores/${editingChore.id}`, method: 'PATCH', body }); setEditingChore(null) }} />}
-      {(chores.data?.chores ?? []).length === 0 ? <EmptyNote>No chores yet.</EmptyNote> : chores.data!.chores.map((chore) => { const person = children.find((candidate) => candidate.id === chore.personId); return <Card key={chore.id} className="flex items-center gap-2"><PersonAvatar name={person?.name ?? '?'} color={person?.color ?? '#777777'} avatarUrl={person?.avatarUrl} /><span className="text-2xl" aria-hidden="true">{choreIconSymbol(chore.icon)}</span><div className="min-w-0 flex-1"><p className="truncate font-bold">{chore.title}</p><p className="text-sm font-semibold text-ink-faint">{person?.name ?? 'Unassigned'} · ★ {chore.starsValue} · {scheduleLabel(chore)} · {chore.routine ?? 'Any time'}</p></div><GhostButton onClick={() => { setShowChore(false); setEditingChore(chore) }}>Edit</GhostButton><GhostButton onClick={() => request.mutate({ path: `/api/v1/chores/${chore.id}`, method: 'PATCH', body: { active: !chore.active } })}>{chore.active ? 'Pause' : 'Resume'}</GhostButton><GhostButton onClick={() => request.mutate({ path: `/api/v1/chores/${chore.id}`, method: 'DELETE' })}>Archive</GhostButton></Card> })}
+      {(chores.data?.chores ?? []).length === 0 ? <EmptyNote>No chores yet.</EmptyNote> : chores.data!.chores.map((chore) => { const person = children.find((candidate) => candidate.id === chore.personId); return <Card key={chore.id} className="flex flex-col gap-3 sm:flex-row sm:items-center sm:gap-2"><div className="flex min-w-0 flex-1 items-center gap-2"><PersonAvatar name={person?.name ?? '?'} color={person?.color ?? '#777777'} avatarUrl={person?.avatarUrl} /><span className="text-2xl" aria-hidden="true">{choreIconSymbol(chore.icon)}</span><div className="min-w-0 flex-1"><p className="truncate font-bold">{chore.title}</p><p className="text-sm font-semibold text-ink-faint">{person?.name ?? 'Unassigned'} · ★ {chore.starsValue} · {scheduleLabel(chore)} · {chore.routine ?? 'Any time'}</p></div></div><div className="flex flex-col gap-2 sm:flex-row"><GhostButton onClick={() => { setShowChore(false); setEditingChore(chore) }}>Edit</GhostButton><GhostButton onClick={() => request.mutate({ path: `/api/v1/chores/${chore.id}`, method: 'PATCH', body: { active: !chore.active } })}>{chore.active ? 'Pause' : 'Resume'}</GhostButton><GhostButton onClick={() => request.mutate({ path: `/api/v1/chores/${chore.id}`, method: 'DELETE' })}>Archive</GhostButton></div></Card> })}
     </AdminSection>
     <AdminSection title="Rewards" action="Add reward" onAction={() => setShowReward(true)}>
       {showReward && <RewardForm onCancel={() => setShowReward(false)} onSave={(body) => { request.mutate({ path: '/api/v1/rewards', method: 'POST', body }); setShowReward(false) }} />}
@@ -40,8 +41,19 @@ export function ChoresRewardsAdminPage() {
     </AdminSection>
     <AdminSection title="Corrections & stars" action="Correct history" onAction={() => setShowCorrection(true)}>
       {showCorrection && <CorrectionForm chores={chores.data?.chores ?? []} onCancel={() => setShowCorrection(false)} onSave={(choreId, dueDate, complete) => { request.mutate({ path: `/api/v1/chores/${choreId}/completion`, method: complete ? 'POST' : 'DELETE', body: { dueDate } }); setShowCorrection(false) }} />}
-      <GhostButton onClick={() => setShowStars(true)}>Adjust star balance</GhostButton>
-      {showStars && <StarsForm people={children} onCancel={() => setShowStars(false)} onSave={(body) => { request.mutate({ path: '/api/v1/stars/adjustments', method: 'POST', body }); setShowStars(false) }} />}
+      <GhostButton onClick={() => { setStarNotice(null); setShowStars(true) }}>Adjust star balance</GhostButton>
+      {starNotice && <p className="text-sm font-bold text-green-800">{starNotice}</p>}
+      {showStars && <StarsForm people={children} onCancel={() => setShowStars(false)} onSave={(body) => {
+        const person = children.find((candidate) => candidate.id === body.personId)
+        request.mutate(
+          { path: '/api/v1/stars/adjustments', method: 'POST', body },
+          { onSuccess: (result) => {
+            const balance = (result as { balance: number }).balance
+            setStarNotice(`${person?.name ?? 'Star'} balance is now ${balance} stars.`)
+            setShowStars(false)
+          } }
+        )
+      }} />}
     </AdminSection>
     <AdminSection title="Reward requests" action={undefined} onAction={() => {}}>{(redemptions.data?.redemptions ?? []).filter((entry) => entry.status === 'pending').length === 0 ? <EmptyNote>No pending reward requests.</EmptyNote> : redemptions.data!.redemptions.filter((entry) => entry.status === 'pending').map((entry) => <Card key={entry.id} className="flex items-center gap-2"><p className="min-w-0 flex-1 font-bold">{entry.rewardTitle} · ★ {entry.starsSpent}</p><PrimaryButton onClick={() => request.mutate({ path: `/api/v1/reward-redemptions/${entry.id}/grant`, method: 'POST' })}>Grant</PrimaryButton></Card>)}</AdminSection>
   </div>

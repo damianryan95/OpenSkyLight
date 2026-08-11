@@ -21,18 +21,21 @@
     "build:server": "tsc -p tsconfig.server.json",
     "build:kiosk": "vite build --config kiosk.vite.config.ts",
     "build:companion": "vite build --config companion.vite.config.ts",
+    "deploy:home": "node scripts/deploy-home.mjs",
     "start:server": "node out/server/index.js",
     "typecheck": "tsc --noEmit -p tsconfig.server.json && tsc --noEmit -p tsconfig.web.json",
     "test": "node ./node_modules/vitest/vitest.mjs run",
     "test:watch": "node ./node_modules/vitest/vitest.mjs",
     "test:admin-shell": "npm run build:companion && node scripts/e2e-admin-shell.mjs",
+    "test:phone-people": "npm run build:companion && node scripts/e2e-phone-people-calendars.mjs",
     "test:phone-chores": "npm run build:companion && node scripts/e2e-phone-chores-rewards.mjs",
     "test:phone-planning": "npm run build:companion && node scripts/e2e-phone-planning.mjs",
     "test:phone-displays": "npm run build:companion && node scripts/e2e-phone-displays-diagnostics.mjs",
     "test:kiosk-browser": "npm run build:kiosk && npm run build:server && node scripts/e2e-kiosk-browser.mjs",
     "test:kiosk-connectivity": "npm run build:kiosk && npm run build:server && node scripts/e2e-kiosk-connectivity.mjs",
     "test:operations": "node ./node_modules/vitest/vitest.mjs run tests/unit/operations.test.ts",
-    "test:multi-display": "npm run build:kiosk && npm run build:server && node scripts/e2e-multi-display.mjs"
+    "test:multi-display": "npm run build:kiosk && npm run build:server && node scripts/e2e-multi-display.mjs",
+    "screenshots:personalization": "node scripts/capture-personalization-prototype.mjs"
   },
   "dependencies": {
     "@googleapis/calendar": "^15.0.0",

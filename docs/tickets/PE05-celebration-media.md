@@ -1,6 +1,6 @@
 # PE05 - Add managed celebration media
 
-Status: planned  
+Status: in progress  
 Depends on: PE01, PE02
 
 ## Context

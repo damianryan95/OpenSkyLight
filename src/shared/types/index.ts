@@ -1,6 +1,8 @@
+import type { BuiltInPersonThemeId, PersonPersonalization } from '../personalization'
+
 export type PersonRole = 'parent' | 'child'
 
-export interface PersonDto {
+export interface PersonDto extends PersonPersonalization {
   id: string
   name: string
   color: string
@@ -14,6 +16,10 @@ export interface PersonCreateInput {
   color: string
   role: PersonRole
   avatarData?: string | null
+  themeId?: BuiltInPersonThemeId | null
+  celebrationAssetId?: string | null
+  celebrationEnabled?: boolean
+  celebrationDurationMs?: number
 }
 
 export interface PersonUpdateInput {
@@ -23,6 +29,10 @@ export interface PersonUpdateInput {
   role?: PersonRole
   sortOrder?: number
   avatarData?: string | null
+  themeId?: BuiltInPersonThemeId | null
+  celebrationAssetId?: string | null
+  celebrationEnabled?: boolean
+  celebrationDurationMs?: number
 }
 
 export type CalendarProvider = 'local' | 'google' | 'ics'

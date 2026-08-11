@@ -41,3 +41,95 @@
   --shadow-card: 0 1px 3px rgba(0, 0, 0, 0.3), 0 10px 28px -10px rgba(0, 0, 0, 0.5);
   --shadow-float: 0 4px 12px rgba(0, 0, 0, 0.45), 0 24px 56px -16px rgba(0, 0, 0, 0.65);
 }
+
+/* Bundled person themes. The `data-person-theme` value is an allow-listed
+   shared registry ID; parent-authored CSS never reaches this selector. */
+:root[data-person-theme='minecraft'] {
+  --color-paper: #e5f1c8;
+  --color-paper-deep: #d1e4aa;
+  --color-card: #fffef4;
+  --color-ink: #203718;
+  --color-ink-soft: #526444;
+  --color-ink-faint: #78876b;
+  --color-line: #b9ce91;
+  --color-ember: #4f7a28;
+  --color-ember-deep: #315517;
+  --color-ember-soft: #dcebb9;
+  --color-sun: #f0d370;
+  --color-sun-soft: #f6edc9;
+}
+
+:root[data-person-theme='frozen'] {
+  --color-paper: #e6f5fc;
+  --color-paper-deep: #d3ebf6;
+  --color-card: #fcfeff;
+  --color-ink: #183d5b;
+  --color-ink-soft: #52738d;
+  --color-ink-faint: #7898ae;
+  --color-line: #b7dce9;
+  --color-ember: #1a78ab;
+  --color-ember-deep: #0c5887;
+  --color-ember-soft: #ccecf8;
+  --color-sun: #b9e3f4;
+  --color-sun-soft: #e9f8fd;
+}
+
+:root[data-person-theme='kpop-demon-hunters'] {
+  --color-paper: #f9e8f8;
+  --color-paper-deep: #f2d7f0;
+  --color-card: #fffaff;
+  --color-ink: #351a4b;
+  --color-ink-soft: #765385;
+  --color-ink-faint: #a47faa;
+  --color-line: #e6bde0;
+  --color-ember: #bd298d;
+  --color-ember-deep: #8d1766;
+  --color-ember-soft: #f7d2ea;
+  --color-sun: #ffc0e9;
+  --color-sun-soft: #fff0fb;
+}
+
+:root.dark[data-person-theme='minecraft'] {
+  --color-paper: #172313;
+  --color-paper-deep: #21351a;
+  --color-card: #203018;
+  --color-ink: #edf7dc;
+  --color-ink-soft: #bdd2a7;
+  --color-ink-faint: #829472;
+  --color-line: #3b5630;
+  --color-ember: #91c957;
+  --color-ember-deep: #b4e575;
+  --color-ember-soft: #344d28;
+  --color-sun: #5d6e2b;
+  --color-sun-soft: #2d421e;
+}
+
+:root.dark[data-person-theme='frozen'] {
+  --color-paper: #102635;
+  --color-paper-deep: #143243;
+  --color-card: #173849;
+  --color-ink: #e8f8ff;
+  --color-ink-soft: #acd0e2;
+  --color-ink-faint: #789cad;
+  --color-line: #2f6078;
+  --color-ember: #6dc9f5;
+  --color-ember-deep: #a1e1ff;
+  --color-ember-soft: #194a62;
+  --color-sun: #285d74;
+  --color-sun-soft: #173f52;
+}
+
+:root.dark[data-person-theme='kpop-demon-hunters'] {
+  --color-paper: #1b1230;
+  --color-paper-deep: #23173d;
+  --color-card: #2a1945;
+  --color-ink: #fff5ff;
+  --color-ink-soft: #d7bce4;
+  --color-ink-faint: #a98cbb;
+  --color-line: #5c367d;
+  --color-ember: #ff5ec9;
+  --color-ember-deep: #ff9bdb;
+  --color-ember-soft: #4c2459;
+  --color-sun: #71346b;
+  --color-sun-soft: #3f214f;
+}

@@ -1,5 +1,6 @@
 import { z } from 'zod'
 import { CHORE_ICON_IDS } from '../choreIcons'
+import { BUILT_IN_PERSON_THEME_IDS } from '../personalization'
 
 /**
  * Shared, browser-safe description of the version-one HTTP boundary. Domain
@@ -52,6 +53,15 @@ export const displayChoreCommandResponseSchema = z.object({
 
 /** Parent-admin people and read-only Google calendar configuration DTOs. */
 export const householdRoleSchema = z.enum(['parent', 'child'])
+export const personThemeIdSchema = z.enum(BUILT_IN_PERSON_THEME_IDS)
+export const personPersonalizationSchema = z.object({
+  themeId: personThemeIdSchema.nullable(),
+  celebrationAssetId: z.string().min(1).max(120).nullable(),
+  celebrationAssetIds: z.array(z.string().min(1).max(120)).max(20),
+  celebrationEnabled: z.boolean(),
+  celebrationDurationMs: z.number().int().min(1_500).max(5_000)
+})
+export const personPersonalizationPatchSchema = personPersonalizationSchema.partial()
 export const personSchema = z.object({
   id: z.string().min(1),
   name: z.string().min(1),
@@ -59,8 +69,8 @@ export const personSchema = z.object({
   role: householdRoleSchema,
   sortOrder: z.number().int().nonnegative(),
   avatarUrl: z.string().max(1_500_000).nullable()
-})
-export const createPersonRequestSchema = personSchema.pick({ name: true, color: true, role: true }).extend({ avatarData: z.string().max(1_500_000).nullable().optional() })
+}).merge(personPersonalizationSchema)
+export const createPersonRequestSchema = personSchema.pick({ name: true, color: true, role: true }).extend({ avatarData: z.string().max(1_500_000).nullable().optional() }).merge(personPersonalizationPatchSchema)
 export const updatePersonRequestSchema = createPersonRequestSchema.partial().extend({ sortOrder: z.number().int().nonnegative().optional(), avatarData: z.string().max(1_500_000).nullable().optional() })
   .refine((value) => Object.keys(value).length > 0, { message: 'At least one person field is required' })
 
@@ -80,7 +90,8 @@ export const setCalendarSelectionRequestSchema = z.object({
 export const googleConfigurationSchema = z.object({ configured: z.boolean(), unlocked: z.boolean(), redirectUri: z.string().url().nullable() })
 export const configureGoogleRequestSchema = z.object({ clientId: z.string().min(1), clientSecret: z.string().min(1), publicUrl: z.string().url() }).strict()
 export const householdSettingsSchema = z.object({ timezone: z.string().min(1), weather: z.object({ lat: z.number().min(-90).max(90), lon: z.number().min(-180).max(180), label: z.string().min(1).max(120) }).nullable() })
-export const updateHouseholdSettingsRequestSchema = householdSettingsSchema.pick({ weather: true })
+export const updateHouseholdSettingsRequestSchema = householdSettingsSchema.pick({ timezone: true, weather: true }).partial()
+  .refine((value) => Object.keys(value).length > 0, { message: 'At least one household setting is required' })
 
 /** Parent-only chores, ledger and rewards administration. RRULE is stored in
  * the server's canonical form, keeping recurrence expansion deterministic. */

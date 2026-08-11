@@ -31,6 +31,15 @@ export function adoptDisplayBootstrap(): void {
 export function displayCredential(): string | null { return localStorage.getItem(DISPLAY_CREDENTIAL_KEY) }
 export function displayId(): string | null { return localStorage.getItem(DISPLAY_ID_KEY) }
 
+/** Fetch assigned celebration bytes with the display credential, never in a URL. */
+export async function fetchDisplayCelebration(assetId: string, signal?: AbortSignal): Promise<Blob> {
+  const credential = displayCredential()
+  if (credential === null) throw new BrowserIpcError('unauthorized', 'Display is not registered')
+  const response = await fetch(`/api/v1/display/media/${encodeURIComponent(assetId)}`, { headers: { Authorization: `Bearer ${credential}` }, signal, cache: 'no-store' })
+  if (!response.ok) throw new BrowserIpcError('media_unavailable', 'Celebration media is unavailable')
+  return response.blob()
+}
+
 /** The browser kiosk reads the richer server sync-health document directly.
  * The legacy Electron IPC shape deliberately remains unchanged. */
 export async function browserGetSyncStatus(fetchImpl: typeof fetch = fetch): Promise<SyncStatus> {

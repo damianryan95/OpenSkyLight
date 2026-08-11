@@ -10,6 +10,11 @@ import type {
 } from '@shared/types'
 import type { DateRange } from '@shared/dates'
 import { useToasts } from '../stores/toastStore'
+import { isDisplayClient } from '../lib/clientMode'
+
+// SSE delivers display changes immediately. This light fallback makes a wall
+// display converge shortly after a proxy or Wi-Fi hiccup drops one message.
+const displayRefreshInterval = (): number | false => isDisplayClient() ? 10_000 : false
 
 export function useAppInfo() {
   return useQuery({ queryKey: ['appInfo'], queryFn: () => ipcInvoke('app:getInfo', undefined), staleTime: Infinity })
@@ -151,12 +156,19 @@ export function useChoresDay(date: string) {
   return useQuery({
     queryKey: ['choresDay', date],
     queryFn: () => ipcInvoke('chores:getDay', { date }),
-    placeholderData: (prev) => prev
+    placeholderData: (prev) => prev,
+    refetchInterval: displayRefreshInterval,
+    refetchIntervalInBackground: true
   })
 }
 
 export function useBalances() {
-  return useQuery({ queryKey: ['balances'], queryFn: () => ipcInvoke('stars:balances', undefined) })
+  return useQuery({
+    queryKey: ['balances'],
+    queryFn: () => ipcInvoke('stars:balances', undefined),
+    refetchInterval: displayRefreshInterval,
+    refetchIntervalInBackground: true
+  })
 }
 
 export function useChoreMutations() {

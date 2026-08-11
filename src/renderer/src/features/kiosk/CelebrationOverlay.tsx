@@ -1,11 +1,13 @@
-import { Component, type JSX, type ReactNode, useEffect, useReducer } from 'react'
+import { Component, type JSX, type ReactNode, useEffect, useMemo, useReducer, useState } from 'react'
 import type { CelebrationEvent } from '@shared/api/contract'
 import { celebrationQueueReducer, type CelebrationQueueState } from '@shared/celebration'
 import { subscribePush } from '../../api/client'
+import { fetchDisplayCelebration } from '../../api/browser'
+import { usePeople } from '../../api/hooks'
 
 const PLACEHOLDER_DURATION_MS = 1_500
 
-const EMPTY_QUEUE: CelebrationQueueState = { active: null, pending: [] }
+const EMPTY_QUEUE: CelebrationQueueState = { active: null, pending: [], overflowCount: 0 }
 
 /**
  * Deliberately minimal host for a future full-screen celebration animation.
@@ -14,31 +16,46 @@ const EMPTY_QUEUE: CelebrationQueueState = { active: null, pending: [] }
  */
 function CelebrationOverlay(): JSX.Element | null {
   const [queue, dispatch] = useReducer(celebrationQueueReducer, EMPTY_QUEUE)
+  const people = usePeople()
+  const [mediaUrl, setMediaUrl] = useState<string | null>(null)
 
   useEffect(() => subscribePush('push:celebrationRequested', (data) => {
     // The typed SSE dispatcher only emits validated CelebrationEvent payloads.
     dispatch({ type: 'enqueue', event: data as CelebrationEvent })
   }), [])
 
+  const person = queue.active === null ? undefined : people.data?.find((candidate) => candidate.id === queue.active!.personId)
+  const reducedMotion = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches ?? false
+  // This value stays stable for one completion even if the people query
+  // revalidates while the celebration is visible.
+  const assetId = useMemo(() => queue.active === null || person === undefined ? null : person.celebrationAssetIds[Math.floor(Math.random() * person.celebrationAssetIds.length)] ?? null, [queue.active?.completionId, person?.id, person?.celebrationAssetIds])
+  useEffect(() => {
+    const active = queue.active
+    if (active === null || reducedMotion || !person?.celebrationEnabled || assetId === null) { setMediaUrl(null); return }
+    const controller = new AbortController(); let objectUrl: string | null = null
+    void fetchDisplayCelebration(assetId, controller.signal).then((blob) => { if (!controller.signal.aborted) { objectUrl = URL.createObjectURL(blob); setMediaUrl(objectUrl) } }).catch(() => setMediaUrl(null))
+    return () => { controller.abort(); if (objectUrl !== null) URL.revokeObjectURL(objectUrl) }
+  }, [queue.active?.completionId, assetId, person?.celebrationEnabled, reducedMotion])
+
   useEffect(() => {
     if (queue.active === null) return
-    const timer = window.setTimeout(() => dispatch({ type: 'dismiss' }), PLACEHOLDER_DURATION_MS)
+    const timer = window.setTimeout(() => dispatch({ type: 'dismiss' }), person?.celebrationDurationMs ?? PLACEHOLDER_DURATION_MS)
     return () => window.clearTimeout(timer)
-  }, [queue.active?.completionId])
+  }, [queue.active?.completionId, person?.celebrationDurationMs])
 
   if (queue.active === null) return null
   return (
     <div
       aria-atomic="true"
       aria-live="polite"
-      className="pointer-events-none fixed inset-0 z-[95] grid place-items-center bg-amber-100/15"
-      data-testid="celebration-overlay-placeholder"
-      onAnimationEnd={() => dispatch({ type: 'dismiss' })}
+      className="pointer-events-none fixed inset-0 z-[95] grid place-items-center bg-amber-100/15 p-8"
+      data-testid="celebration-overlay"
       role="status"
     >
-      <span className="rounded-full bg-white/90 px-8 py-4 text-2xl font-bold text-amber-700 shadow-lg">
-        Chore complete +{queue.active.stars}
-      </span>
+      <div className="celebration-card rounded-[2rem] bg-white/95 p-6 text-center shadow-2xl">
+        {mediaUrl === null ? <div className="text-6xl" aria-hidden="true">⭐</div> : <img className="celebration-media mx-auto object-contain" src={mediaUrl} alt="" />}
+        <span className="mt-3 block text-2xl font-bold text-amber-700">{person?.name ?? 'Great job'} earned +{queue.active.stars} stars!</span>
+      </div>
     </div>
   )
 }

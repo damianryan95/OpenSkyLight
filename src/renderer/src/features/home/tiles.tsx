@@ -172,46 +172,9 @@ export function WeatherTile({ tile, compact }: TileProps) {
   )
 }
 
-export function ChoresProgressTile({ compact }: TileProps) {
-  const { data: chores = [] } = useChoresDay(today())
-  const { data: people = [] } = usePeople()
-  const viewingContext = useUi((s) => s.viewingContext)
-  const mutations = useChoreMutations()
-  const withChores = peopleInViewingContext(viewingContext, people).filter((p) => chores.some((c) => c.personId === p.id))
-  const shown = chores.filter((chore) => withChores.some((person) => person.id === chore.personId))
-  return (
-    <div className="flex h-full flex-col overflow-hidden">
-      <TileTitle>Chores today</TileTitle>
-      {shown.length === 0 ? (
-        <Placeholder>No chores today</Placeholder>
-      ) : (
-        <div className="flex min-h-0 flex-1 flex-col gap-1.5 overflow-y-auto pr-1">
-          {shown.map((chore) => {
-            const person = people.find((candidate) => candidate.id === chore.personId)
-            if (!person) return null
-            return (
-              <button key={chore.choreId} type="button" onClick={() => chore.completed ? mutations.uncomplete.mutate({ choreId: chore.choreId, date: today() }) : mutations.complete.mutate({ choreId: chore.choreId, date: today() })} className={`pressable flex min-h-11 items-center gap-2 rounded-xl bg-paper-deep/60 px-2 text-left ${chore.completed ? 'opacity-65' : ''}`}>
-                <IconVisual icon={chore.icon} size="text-xl" />
-                <span
-                  className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full border-2 text-[10px] font-extrabold"
-                  style={{ borderColor: person.color, backgroundColor: chore.completed ? person.color : 'transparent', color: chore.completed ? textOn(person.color) : person.color }}
-                >
-                  {chore.completed ? <CheckIcon size={16} /> : initials(person.name)}
-                </span>
-                <span className={`min-w-0 flex-1 truncate font-bold ${compact ? 'text-sm' : 'text-base'} ${chore.completed ? 'line-through' : ''}`}>{chore.title}</span>
-                {!compact && <span className="shrink-0 text-xs font-extrabold text-ember-deep">★ {chore.starsValue}</span>}
-              </button>
-            )
-          })}
-        </div>
-      )}
-    </div>
-  )
-}
-
 /** A wall-friendly family board inspired by paper chore charts: each child
  * owns a coloured column, while time-of-day keeps their routine scannable. */
-export function FamilyChoresTile({ compact }: TileProps) {
+function ChoreColumnsTile({ compact, title }: Pick<TileProps, 'compact'> & { title: string }) {
   const { data: chores = [] } = useChoresDay(today())
   const { data: people = [] } = usePeople()
   const viewingContext = useUi((s) => s.viewingContext)
@@ -223,7 +186,7 @@ export function FamilyChoresTile({ compact }: TileProps) {
     { label: 'Morning', routine: 'morning' }, { label: 'Anytime', routine: null }, { label: 'Evening', routine: 'evening' }
   ]
   return <div className="flex h-full flex-col overflow-hidden">
-    <TileTitle>Family chores</TileTitle>
+    <TileTitle>{title}</TileTitle>
     {shown.length === 0 ? <Placeholder>No chores today</Placeholder> : <div className="grid min-h-0 flex-1 auto-cols-[minmax(10.5rem,1fr)] grid-flow-col gap-3 overflow-x-auto pb-1">
       {shown.map((person) => {
         const personChores = chores.filter((chore) => chore.personId === person.id)
@@ -241,7 +204,7 @@ export function FamilyChoresTile({ compact }: TileProps) {
                 {groupChores.map((chore) => <button key={chore.choreId} type="button" onClick={() => chore.completed ? mutations.uncomplete.mutate({ choreId: chore.choreId, date: today() }) : mutations.complete.mutate({ choreId: chore.choreId, date: today() })} className={`pressable flex min-h-14 w-full items-center gap-2 rounded-2xl px-2.5 text-left ${chore.completed ? 'opacity-60' : ''}`} style={{ backgroundColor: chore.completed ? person.color : `${person.color}16`, color: chore.completed ? textOn(person.color) : undefined }}>
                   <IconVisual icon={chore.icon} />
                   <span className={`min-w-0 flex-1 truncate font-bold ${compact ? 'text-sm' : 'text-base'} ${chore.completed ? 'line-through' : ''}`}>{chore.title}</span>
-                  <span className="shrink-0 text-xs font-extrabold">★ {chore.starsValue}</span>
+                  <span className="flex shrink-0 items-center gap-0.5 rounded-full px-1.5 py-0.5 text-xl leading-none font-extrabold" style={{ backgroundColor: chore.completed ? `${textOn(person.color)}24` : `${person.color}24`, color: chore.completed ? textOn(person.color) : person.color }}><span className="text-2xl leading-none" aria-hidden="true">★</span>{chore.starsValue}</span>
                   <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full border-2" style={{ borderColor: chore.completed ? textOn(person.color) : person.color }}>{chore.completed && <CheckIcon size={15} />}</span>
                 </button>)}
               </div></div>
@@ -251,6 +214,16 @@ export function FamilyChoresTile({ compact }: TileProps) {
       })}
     </div>}
   </div>
+}
+
+/** The primary home tile presents every child's chores side by side. */
+export function ChoresProgressTile({ compact }: TileProps) {
+  return <ChoreColumnsTile compact={compact} title="Chores today" />
+}
+
+/** Retained as an optional home-layout tile for existing household layouts. */
+export function FamilyChoresTile({ compact }: TileProps) {
+  return <ChoreColumnsTile compact={compact} title="Family chores" />
 }
 
 export function StarBalancesTile({ compact }: TileProps) {

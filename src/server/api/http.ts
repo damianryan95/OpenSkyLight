@@ -7,6 +7,7 @@ import {
 } from '../../shared/api/contract'
 
 export const MAX_JSON_BODY_BYTES = 1_048_576
+export const MAX_MEDIA_BODY_BYTES = 25 * 1_024 * 1_024
 
 export class ApiRequestError extends Error {
   constructor(
@@ -64,6 +65,20 @@ export async function readJsonBody<T>(request: IncomingMessage, schema: z.ZodTyp
   }
 
   return validateApiInput(value, schema)
+}
+
+/** Read a small, explicitly bounded binary upload without buffering an unbounded request. */
+export async function readBinaryBody(request: IncomingMessage, maxBytes = MAX_MEDIA_BODY_BYTES): Promise<Buffer> {
+  const contentLength = request.headers['content-length']
+  if (contentLength !== undefined && Number(contentLength) > maxBytes) throw new ApiRequestError(413, 'payload_too_large', 'Media upload exceeds the 25 MB limit')
+  const chunks: Buffer[] = []; let total = 0
+  for await (const chunk of request) {
+    const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk)
+    total += buffer.length
+    if (total > maxBytes) throw new ApiRequestError(413, 'payload_too_large', 'Media upload exceeds the 25 MB limit')
+    chunks.push(buffer)
+  }
+  return Buffer.concat(chunks)
 }
 
 export function formatZodIssues(error: z.ZodError): ApiValidationIssue[] {

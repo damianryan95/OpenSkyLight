@@ -111,6 +111,11 @@ export function parentMutation<T>(path: string, method: 'POST' | 'PATCH' | 'PUT'
   }, true)
 }
 
+/** Binary uploads use the same session/CSRF boundary but deliberately skip JSON encoding. */
+export function parentUpload<T>(path: string, file: File): Promise<T> {
+  return parentRequest<T>(path, { method: 'POST', headers: { 'Content-Type': file.type, 'x-osl-file-name': file.name }, body: file }, true)
+}
+
 export function getParentAuthStatus(): Promise<ParentAuthStatus> {
   return parentRequest<ParentAuthStatus>('/api/v1/auth/status')
 }

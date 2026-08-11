@@ -26,3 +26,17 @@ npm run screenshots:baseline
 identify docs/screenshots/baselines/*.png
 sha256sum docs/screenshots/baselines/*.png
 ```
+
+## Personalization interaction study
+
+The PE01 prototype is intentionally separate from parity baselines. It captures
+the Minecraft personal view, ordinary/reduced-motion celebration, and the parent
+phone setup flow without changing the production kiosk:
+
+```fish
+fnm use 22.13.1
+npm run screenshots:personalization
+```
+
+References and the reviewed interaction contract are in
+[`docs/personalization-prototype.md`](../personalization-prototype.md).

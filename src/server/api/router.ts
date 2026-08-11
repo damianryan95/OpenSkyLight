@@ -3,12 +3,13 @@ import { z } from 'zod'
 import { DateTime } from 'luxon'
 import { addListItemRequestSchema, apiContract, apiInfoResponseSchema, choreCorrectionRequestSchema, configureGoogleRequestSchema, createChoreRequestSchema, createListRequestSchema, createPersonRequestSchema, createRewardRequestSchema, displayChoreCommandRequestSchema, mealRangeRequestSchema, mealSlotKindSchema, redeemRewardRequestSchema, registerDisplayRequestSchema, setCalendarSelectionRequestSchema, setMealRequestSchema, setMealTemplateRequestSchema, starAdjustmentRequestSchema, updateChoreRequestSchema, updateDisplayRequestSchema, updateHouseholdSettingsRequestSchema, updateListRequestSchema, updatePersonRequestSchema, updateRewardRequestSchema } from '../../shared/api/contract'
 import { AuthError, CSRF_HEADER, DisplayDeviceService, HouseholdAuthService, PARENT_SESSION_COOKIE } from '../auth'
-import type { ChoresRewardsService, DisplayReadService, HouseholdSettingsService, ListsDomain, MealsDomain, PeopleService } from '../domain'
+import { type ChoresRewardsService, type DisplayReadService, type HouseholdSettingsService, type ListsDomain, type MealsDomain, type PeopleService, type MediaService } from '../domain'
+import { createReadStream } from 'node:fs'
 import type { EventStream, EventStreamAuthenticator } from '../events'
 import type { GoogleConfigurationVault, GoogleConnectionService, GoogleSyncScheduler } from '../sync/google'
 import type { GoogleSyncStatusService } from '../sync/google'
 import type { OnlineIconSearchService } from '../icons'
-import { ApiRequestError, readJsonBody, sendApiError, sendJson, validateApiInput } from './http'
+import { ApiRequestError, readBinaryBody, readJsonBody, sendApiError, sendJson, validateApiInput } from './http'
 
 export interface ApiRouterDependencies {
   eventStream?: EventStream
@@ -26,6 +27,7 @@ export interface ApiRouterDependencies {
   lists?: ListsDomain
   meals?: MealsDomain
   icons?: OnlineIconSearchService
+  media?: MediaService
   /** Injectable clock for household-date authorization tests. */
   now?: () => Date
 }
@@ -109,7 +111,14 @@ export async function handleApiRequest(request: IncomingMessage, response: Serve
     if (path === '/api/v1/household/settings') {
       if (dependencies.settings === undefined) throw new ApiRequestError(503, 'service_unavailable', 'Household settings are unavailable')
       if (method === 'GET') { requireParentRead(auth, request); sendJson(response, 200, dependencies.settings.get()); return true }
-      if (method === 'PATCH') { requireParentMutation(auth, request); const input = await readJsonBody(request, updateHouseholdSettingsRequestSchema); sendJson(response, 200, dependencies.settings.setWeather(input.weather)); return true }
+      if (method === 'PATCH') {
+        requireParentMutation(auth, request)
+        const input = await readJsonBody(request, updateHouseholdSettingsRequestSchema)
+        if (input.timezone !== undefined) dependencies.settings.setTimezone(input.timezone)
+        const settings = input.weather === undefined ? dependencies.settings.get() : dependencies.settings.setWeather(input.weather)
+        sendJson(response, 200, settings)
+        return true
+      }
       throw new ApiRequestError(405, 'method_not_allowed', `Method ${method} is not allowed`)
     }
     if (path === '/api/v1/weather/locations') {
@@ -132,6 +141,28 @@ export async function handleApiRequest(request: IncomingMessage, response: Serve
         return true
       }
       throw new ApiRequestError(405, 'method_not_allowed', `Method ${method} is not allowed`)
+    }
+
+    if (path === '/api/v1/media/celebrations') {
+      if (dependencies.media === undefined) throw new ApiRequestError(503, 'service_unavailable', 'Celebration media is unavailable')
+      if (method === 'GET') { requireParentRead(auth, request); sendJson(response, 200, { assets: dependencies.media.list() }); return true }
+      if (method === 'POST') { requireParentMutation(auth, request); const asset = await dependencies.media.upload({ bytes: await readBinaryBody(request), contentType: readHeader(request, 'content-type'), originalName: readHeader(request, 'x-osl-file-name') }); sendJson(response, 201, asset); return true }
+      throw new ApiRequestError(405, 'method_not_allowed', `Method ${method} is not allowed`)
+    }
+    const parentMediaMatch = /^\/api\/v1\/media\/celebrations\/([^/]+)(?:\/(content))?$/.exec(path)
+    if (parentMediaMatch !== null) {
+      if (dependencies.media === undefined) throw new ApiRequestError(503, 'service_unavailable', 'Celebration media is unavailable')
+      const id = decodeURIComponent(parentMediaMatch[1]); const content = parentMediaMatch[2]
+      if (content === 'content' && method === 'GET') { requireParentRead(auth, request); return sendMedia(response, dependencies.media.file(id)) }
+      if (content === undefined && method === 'DELETE') { requireParentMutation(auth, request); await dependencies.media.remove(id); response.writeHead(204); response.end(); return true }
+      throw new ApiRequestError(405, 'method_not_allowed', `Method ${method} is not allowed`)
+    }
+    const displayMediaMatch = /^\/api\/v1\/display\/media\/([^/]+)$/.exec(path)
+    if (displayMediaMatch !== null) {
+      if (method !== 'GET') throw new ApiRequestError(405, 'method_not_allowed', `Method ${method} is not allowed`)
+      if (dependencies.media === undefined || displays === undefined) throw new ApiRequestError(503, 'service_unavailable', 'Celebration media is unavailable')
+      if (displays.authenticate(readBearerToken(request)) === undefined) throw new AuthError(401, 'unauthorized', 'A registered display credential is required')
+      return sendMedia(response, dependencies.media.assignedFile(decodeURIComponent(displayMediaMatch[1])))
     }
 
     const personMatch = /^\/api\/v1\/people\/([^/]+)$/.exec(path)
@@ -196,7 +227,15 @@ export async function handleApiRequest(request: IncomingMessage, response: Serve
     if (path === '/api/v1/stars/adjustments') {
       if (dependencies.chores === undefined) throw new ApiRequestError(503, 'service_unavailable', 'Chore service is unavailable')
       if (method !== 'POST') throw new ApiRequestError(405, 'method_not_allowed', `Method ${method} is not allowed`)
-      requireParentMutation(auth, request); const input = await readJsonBody(request, starAdjustmentRequestSchema); sendJson(response, 200, { balance: dependencies.chores.adjustStars(input) }); return true
+      requireParentMutation(auth, request)
+      const input = await readJsonBody(request, starAdjustmentRequestSchema)
+      const balance = dependencies.chores.adjustStars(input)
+      // A manual adjustment changes the same display balances as a chore. Let
+      // every connected kiosk revalidate immediately instead of waiting for a
+      // poll or a later chore completion.
+      dependencies.eventStream?.publish({ type: 'query.invalidated', data: { resources: ['chores'] } })
+      sendJson(response, 200, { balance })
+      return true
     }
     if (path === '/api/v1/rewards') {
       if (dependencies.chores === undefined) throw new ApiRequestError(503, 'service_unavailable', 'Reward service is unavailable')
@@ -502,7 +541,12 @@ async function handleDisplayReadRpc(
 ): Promise<unknown> {
   const read = dependencies.displayRead
   switch (channel) {
-    case 'app:getInfo': return { version: process.env.OSL_RELEASE_VERSION ?? '0.8.0', platform: 'browser', zone: dependencies.settings.get().timezone }
+    case 'app:getInfo': return {
+      version: process.env.OSL_RELEASE_VERSION ?? '0.8.0',
+      platform: 'browser',
+      zone: dependencies.settings.get().timezone,
+      householdDate: currentHouseholdDate(dependencies.settings, dependencies.now)
+    }
     case 'settings:getAll': return read.settings(device)
     case 'settings:set': {
       if ((displayLayoutEditUntil.get(device.id) ?? 0) < Date.now()) throw new AuthError(403, 'forbidden', 'Enter the parent PIN before changing this display layout')
@@ -602,6 +646,18 @@ function currentHouseholdDate(settings: HouseholdSettingsService, now: (() => Da
 function readHeader(request: IncomingMessage, name: string): string | undefined {
   const value = request.headers[name]
   return Array.isArray(value) ? value[0] : value
+}
+
+function sendMedia(response: ServerResponse, media: { path: string; mediaType: string; byteSize: number } | undefined): true {
+  if (media === undefined) throw new ApiRequestError(404, 'not_found', 'Celebration media not found')
+  response.writeHead(200, {
+    'content-type': media.mediaType,
+    'content-length': String(media.byteSize),
+    'cache-control': 'private, max-age=3600',
+    'x-content-type-options': 'nosniff'
+  })
+  createReadStream(media.path).on('error', () => response.destroy()).pipe(response)
+  return true
 }
 
 function readCookie(request: IncomingMessage, name: string): string | undefined {

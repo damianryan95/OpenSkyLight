@@ -1,6 +1,6 @@
 # PE03 - Build the context-aware theme engine
 
-Status: planned  
+Status: done
 Depends on: PE01, PE02
 
 ## Context

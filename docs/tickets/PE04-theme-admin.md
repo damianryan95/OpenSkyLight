@@ -1,6 +1,6 @@
 # PE04 - Add parent theme assignment
 
-Status: planned  
+Status: done
 Depends on: PE02, PE03
 
 ## Context

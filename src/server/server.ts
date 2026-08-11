@@ -6,7 +6,7 @@ import { sendLiveHealth, sendReadyHealth } from './api/health'
 import { handleApiRequest } from './api/router'
 import { DisplayDeviceService, HouseholdAuthService, PARENT_SESSION_COOKIE } from './auth'
 import type { ServerDatabase } from './db'
-import { createChoresRewardsService, createDisplayReadService, createHouseholdSettingsService, createListsDomain, createMealsDomain, createPeopleService } from './domain'
+import { createChoresRewardsService, createDisplayReadService, createHouseholdSettingsService, createListsDomain, createMealsDomain, createPeopleService, createMediaService } from './domain'
 import { EventStream, type EventStreamAuthenticator } from './events'
 import { createGoogleSyncScheduler, createGoogleSyncStatusService, GoogleConfigurationVault, type GoogleConnectionService } from './sync/google'
 import { safeLogErrorMessage } from './logging'
@@ -22,6 +22,8 @@ export interface HeadlessServerOptions {
   staticDir?: string
   /** Built parent administration bundle, served at /admin/. */
   companionStaticDir?: string
+  /** Persistent server-owned location for celebration media. */
+  mediaDir?: string
   /** Optional until an operator mounts the Google OAuth secrets. */
   google?: GoogleConnectionService
 }
@@ -50,6 +52,7 @@ export function createHeadlessServer(options: HeadlessServerOptions = {}): Headl
   const displays = options.database === undefined ? undefined : new DisplayDeviceService(options.database.sqlite)
   const settings = options.database === undefined ? undefined : createHouseholdSettingsService(options.database.sqlite)
   const people = options.database === undefined ? undefined : createPeopleService(options.database.sqlite)
+  const media = options.database === undefined || options.mediaDir === undefined ? undefined : createMediaService(options.database.sqlite, options.mediaDir)
   const googleConfiguration = options.database === undefined ? undefined : new GoogleConfigurationVault(options.database.sqlite)
   const googleSyncStatus = options.database === undefined ? undefined : createGoogleSyncStatusService(options.database.sqlite, {
     publish: (data) => eventStream.publish({ type: 'sync.status', data })
@@ -90,7 +93,7 @@ export function createHeadlessServer(options: HeadlessServerOptions = {}): Headl
         return device === undefined ? undefined : { type: 'display' as const, id: device.id }
       }
     }),
-    ...(auth === undefined || displays === undefined || settings === undefined || chores === undefined || people === undefined || googleSyncStatus === undefined || displayRead === undefined || lists === undefined || meals === undefined ? {} : { auth, displays, settings, chores, people, googleSyncStatus, googleSyncScheduler, displayRead, lists, meals, icons: createOnlineIconSearchService() }),
+    ...(auth === undefined || displays === undefined || settings === undefined || chores === undefined || people === undefined || googleSyncStatus === undefined || displayRead === undefined || lists === undefined || meals === undefined ? {} : { auth, displays, settings, chores, people, media, googleSyncStatus, googleSyncScheduler, displayRead, lists, meals, icons: createOnlineIconSearchService() }),
     ...(options.google === undefined ? {} : { google: options.google }),
     ...(googleConfiguration === undefined ? {} : { googleConfiguration })
   }, options.staticDir, options.companionStaticDir)

@@ -1,6 +1,6 @@
 # PE06 - Add parent celebration setup and preview
 
-Status: planned  
+Status: in progress  
 Depends on: PE02, PE05
 
 ## Context

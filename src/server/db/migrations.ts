@@ -289,6 +289,40 @@ const migrations: readonly string[] = [
       free_text TEXT NOT NULL,
       PRIMARY KEY (day_of_week, slot)
     );
+  `,
+
+  // 008 - person theme and celebration contract, before managed media upload
+  `
+    CREATE TABLE media_assets (
+      id TEXT PRIMARY KEY,
+      kind TEXT NOT NULL CHECK (kind IN ('celebration', 'theme_background')),
+      original_name TEXT NOT NULL,
+      media_type TEXT NOT NULL,
+      byte_size INTEGER NOT NULL CHECK (byte_size >= 0),
+      width INTEGER NOT NULL CHECK (width > 0),
+      height INTEGER NOT NULL CHECK (height > 0),
+      frame_count INTEGER NOT NULL CHECK (frame_count > 0),
+      sha256 TEXT NOT NULL UNIQUE,
+      storage_key TEXT NOT NULL UNIQUE,
+      created_at TEXT NOT NULL,
+      deleted_at TEXT
+    );
+    CREATE INDEX idx_media_assets_active_kind ON media_assets(kind) WHERE deleted_at IS NULL;
+
+    ALTER TABLE people ADD COLUMN theme_id TEXT;
+    ALTER TABLE people ADD COLUMN celebration_asset_id TEXT REFERENCES media_assets(id) ON DELETE RESTRICT;
+    ALTER TABLE people ADD COLUMN celebration_enabled INTEGER NOT NULL DEFAULT 1 CHECK (celebration_enabled IN (0, 1));
+    ALTER TABLE people ADD COLUMN celebration_duration_ms INTEGER NOT NULL DEFAULT 3000
+      CHECK (celebration_duration_ms BETWEEN 1500 AND 5000);
+  `
+  ,
+  // 009 - more than one celebration per person; the legacy primary column is retained for compatibility.
+  `
+    ALTER TABLE people ADD COLUMN celebration_asset_ids TEXT NOT NULL DEFAULT '[]';
+    UPDATE people SET celebration_asset_ids = CASE
+      WHEN celebration_asset_id IS NULL THEN '[]'
+      ELSE json_array(celebration_asset_id)
+    END;
   `
 ]
 

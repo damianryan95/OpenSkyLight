@@ -33,7 +33,7 @@ export const TILE_SPECS: Record<HomeTileType, TileSpec> = {
   clock: { minW: 2, minH: 2, defaultW: 2, defaultH: 2, allowMultiple: false, configKeys: [] },
   photo: { minW: 2, minH: 2, defaultW: 3, defaultH: 4, allowMultiple: true, configKeys: [] },
   news: { minW: 3, minH: 2, defaultW: 4, defaultH: 3, allowMultiple: true, configKeys: ['feedId'] },
-  timer: { minW: 3, minH: 2, defaultW: 4, defaultH: 3, allowMultiple: false, configKeys: [] }
+  timer: { minW: 2, minH: 2, defaultW: 4, defaultH: 3, allowMultiple: false, configKeys: [] }
 }
 
 /** Tiles the full 12x6 grid with no gaps. Clock/weather tiles are NOT placed by
