@@ -24,13 +24,7 @@ displays. Please visit and star the [upstream repository](https://github.com/low
 
 ## Screenshots
 
-<p align="center">
-  <img src="docs/screenshots/home.png" alt="OpenSkyLight wall-display home screen, showing today, this week, meals, chores, and stars" width="1100">
-</p>
-
-<p align="center">
-  <img src="docs/screenshots/companion-chores.png" alt="OpenSkyLight phone chore screen with family members, chore completion, and star balances" width="320">
-</p>
+Would be great right about here
 
 ## What you need
 
