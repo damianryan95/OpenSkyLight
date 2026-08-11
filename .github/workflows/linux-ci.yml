@@ -34,7 +34,7 @@ jobs:
         run: docker build --build-arg OSL_VERSION=ci --tag openskylight:ci .
 
       - name: Scan container image
-        uses: aquasecurity/trivy-action@0.33.1
+        uses: aquasecurity/trivy-action@v0.36.0
         with:
           image-ref: openskylight:ci
           format: table
