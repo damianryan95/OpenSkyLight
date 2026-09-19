@@ -20,13 +20,16 @@ Use opaque storage keys, atomic writes, SHA-256 deduplication where safe, and
 compensating cleanup across database/file failures. Never return absolute paths
 or accept client-selected destination paths.
 
+Reject files over 25 MB, dimensions over 4096 x 4096, or more than 600 frames.
+
 Likely files: media migration/domain, API routes/contracts, filesystem adapter,
 Docker/deployment configuration, tests.
 
 ## Acceptance
 
-- Extension/MIME spoofing, path traversal, SVG, oversized dimensions/bytes/frame
-  count, and corrupt files are rejected with safe messages.
+- Extension/MIME spoofing, path traversal, SVG, oversized dimensions (over
+  4096 x 4096), oversized bytes (over 25 MB), oversized frame count (over
+  600), and corrupt files are rejected with safe messages.
 - A registered display can fetch assigned media but cannot upload, enumerate, or
   delete parent assets.
 - Responses set correct content type, nosniff, private caching, and bounded
