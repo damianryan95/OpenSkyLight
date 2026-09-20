@@ -37,6 +37,18 @@ ENV NODE_ENV=production \
     OSL_SERVER_PORT=3000 \
     OSL_DATABASE_PATH=/data/openskylight.db
 
+# The Node version is pinned deliberately, so its base image carries whatever
+# Debian snapshot it was built against. Patch those packages in place rather
+# than unpinning Node, and drop the package managers: the runtime only ever
+# invokes `node`, and npm vendors its own copy of node-tar that ages
+# independently of anything this project depends on.
+RUN apt-get update \
+  && apt-get upgrade -y --no-install-recommends \
+  && rm -rf /var/lib/apt/lists/* \
+  && rm -rf /usr/local/lib/node_modules/npm /usr/local/lib/node_modules/corepack \
+      /usr/local/bin/npm /usr/local/bin/npx /usr/local/bin/corepack \
+      /usr/local/bin/yarn /usr/local/bin/yarnpkg
+
 COPY --from=build /app/package.json ./
 COPY --from=build /app/node_modules ./node_modules
 COPY --from=build /app/out/server ./out/server
