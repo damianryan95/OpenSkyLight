@@ -136,6 +136,35 @@ Product and technical direction: [`personalization-roadmap.md`](../personalizati
 Only PE01 is initially ready. Follow the dependency graph in the personalization
 roadmap; do not use the older refactor wave numbers for these extension tickets.
 
+### Phone-first platform
+
+Product and technical direction: [`phone-first-roadmap.md`](../phone-first-roadmap.md).
+
+- [N01 - Audit functionality removed from the upstream project](N01-removed-functionality-audit.md)
+- [N13 - Retire the Google OAuth layer and de-Google the event schema](N13-retire-google-oauth-layer.md)
+- [N14 - CalDAV and ICS calendar source](N14-caldav-ics-source.md)
+- [N05 - Phone-native calendar connector](N05-native-calendar-connector-adr.md)
+- [N06 - Bidirectional calendar sync](N06-bidirectional-calendar-sync-adr.md)
+- [N02 - Raspberry Pi first-boot Wi-Fi access point pairing](N02-pi-wifi-ap-pairing.md)
+- [N03 - Local network name for the server](N03-local-network-name.md)
+- [N04 - Phone-first setup wizard](N04-phone-first-setup-wizard.md)
+- [N07 - Self-hosted remote access via WireGuard](N07-remote-access-adr.md)
+- [N08 - Local USB backup target](N08-local-usb-backup.md)
+- [N09 - Personal cloud backup target](N09-personal-cloud-backup.md)
+- [N10 - SD card photo storage (deferred)](N10-sd-card-photo-storage.md)
+- [N11 - Device access hardening (deferred)](N11-device-access-hardening.md)
+- [N12 - Power management (deferred)](N12-power-management.md)
+
+N01 and N13 are ready. The calendar direction is set by
+[ADR 0002](../adr/0002-provider-agnostic-calendar-access.md), which supersedes
+ADR 0001 and removes the Google OAuth layer; the remote-access direction is set
+by [ADR 0003](../adr/0003-self-hosted-remote-access.md). Treat `G01`–`G05` as
+historical rather than current architecture. N02, N04, and N12 depend on O02's
+real-Pi hardware evidence; Phase 1 (N13, N14, N05) deliberately does not, so
+calendar work can proceed while hardware is unavailable. Follow the dependency
+graph and phasing in the phone-first roadmap; do not use the older refactor or
+personalization wave numbers for these tickets.
+
 ## Suggested parallel waves
 
 - Wave 1: F01, F02, F03, F04, G01.
@@ -146,6 +175,13 @@ roadmap; do not use the older refactor wave numbers for these extension tickets.
   permits.
 - Wave 6: C01, C02, and C03 after browser/phone parity; then C04.
 - Wave 7: O01, O02, O03; finish with O04.
+- Wave 8 (calendar independence, no hardware dependency): N01 and N13
+  immediately; then N14 and N05 in parallel once N13's seam lands; N06 after
+  both.
+- Wave 9 (phone-first onboarding, needs O02): N02 and N03, then N04; O04
+  alongside.
+- Wave 10: N07, then N08 and N09.
+- Wave 11 (deferred "sellable product" phase): N10, N11, N12.
 
 Do not run tickets concurrently when their likely-file lists overlap unless the
 agents coordinate ownership first.

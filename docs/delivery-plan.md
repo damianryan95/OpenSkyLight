@@ -1,0 +1,153 @@
+# Delivery plan
+
+Status: active
+Last updated: 2026-09-20
+Strategy: [`phone-first-roadmap.md`](phone-first-roadmap.md)
+Tickets: [`tickets/README.md`](tickets/README.md)
+
+This is the execution plan: what gets built, in what order, with what gates.
+The roadmap says *why* and *what*; this says *when* and *how we know it
+worked*.
+
+## Current deployment status
+
+The Portainer stack on `home-server` is a **basic deployment smoke test only**.
+Nothing is connected to it, it holds no real household data, and no calendar
+source is configured. It is not a production instance and nothing in this plan
+needs to protect it.
+
+Consequences, which this plan assumes throughout:
+
+- **There is no data to migrate or preserve.** Schema changes amend the
+  existing migrations in place; existing volumes are discarded and rebuilt.
+- **No backups are required before schema work.**
+- **Greenfield posture.** Removing a capability before its replacement lands
+  carries no user impact — sequencing is driven by keeping each phase coherent,
+  not by protecting live state.
+
+## Ground rules
+
+- **One ticket per branch**, named `ticket/<id>-<slug>`. The agent handoff
+  contract in `tickets/README.md` applies unchanged.
+- **CI is the gate.** Every branch must pass the existing Linux CI job:
+  `npm ci`, `npm run typecheck`, `npm test`, `npm audit --omit=dev
+  --audit-level=high`, a Docker build, and the Trivy scan. Nothing merges red.
+- **Push per completed phase, not per ticket.** Work accumulates locally and on
+  branches; a phase is the unit of delivery to `origin`. Tickets within a phase
+  merge locally and go up together when the milestone's exit criteria are met.
+- **Preserve unrelated worktree changes.** This repo carries broad in-progress
+  work; do not reset or discard outside the ticket at hand.
+
+## Milestone 1 — Calendar independence
+
+**Tickets:** `N13` + `N14` (shipped together), then `N05`
+**Blocked by:** nothing — deliberately has no hardware dependency
+**Goal:** the product syncs any calendar, with no Google Cloud project, client
+secret, domain, or HTTPS prerequisite.
+
+`N13` removes the only calendar source the product currently has, so the phase
+is only coherent once `N14` lands beside it. Both are built before this
+milestone is pushed.
+
+Sequence:
+
+1. **`N13` — retire the Google layer.**
+   1. Amend the existing migrations in place so the Google tables were never
+      created; `events.google_event_id` becomes `source_event_id` with a
+      `source` discriminator, and the calendar table becomes source-neutral.
+   2. Delete `src/server/sync/google/`, its routes in `api/router.ts`, and its
+      wiring in `server.ts`.
+   3. De-Google `src/shared/eventFeeds.ts` and `src/shared/api/contract.ts`.
+   4. Rework sync health around per-source liveness; add the "no calendar
+      connected" state.
+   5. Strip the Google connect/vault UI from the companion and kiosk settings.
+   6. Drop `@googleapis/calendar` and `google-auth-library` from
+      `package.json`.
+2. **`N14` — CalDAV and ICS source**, built on the seam from step 1.
+3. **Push the milestone** once both are merged locally and CI is green.
+4. **`N05` — phone-native connector** follows as its own piece of work. It
+   needs a mobile delivery vehicle the current browser-based companion does not
+   have; scope that first and report back before building, splitting the ticket
+   if the approach warrants it.
+
+**Exit criteria:** a parent connects a calendar from a phone using only a URL
+and an app password, events appear correctly on the kiosk including recurrence
+and all-day handling, no Google-specific code or schema remains anywhere in the
+migration sequence, and a fresh volume builds cleanly.
+
+## Milestone 2 — Phone-first onboarding
+
+**Tickets:** `N02`, `N03`, `N04`, and the already-open `O02` / `O04`
+**Blocked by:** `O02` needs real Raspberry Pi 5 hardware
+**Goal:** a parent with a factory Pi and a phone reaches a working kiosk with
+no keyboard, monitor, or documentation.
+
+`N03` (mDNS name) has no hardware dependency and can be pulled forward into
+Milestone 1's slack time. `N02` and `N04` cannot start until `O02` produces
+real-hardware evidence, so **acquiring the Pi is the scheduling priority here**,
+not writing code.
+
+Sequence: `N03` → (`O02` evidence) → `N02` → `N04` → `O04` closes out.
+
+**Exit criteria:** `O02` and `O04` both move off blocked with recorded hardware
+results, and the wizard path is proven end-to-end on a factory image.
+
+## Milestone 3 — Anywhere access and two-way sync
+
+**Tickets:** `N07`, then `N06`
+**Blocked by:** `N03`, `N04` (N07); `N05`, `N14` (N06)
+**Goal:** manage the board from anywhere over a self-hosted tunnel, and write
+events back to the underlying calendar.
+
+`N07` requires a security review before merge per ADR 0003 — budget for it
+rather than treating it as a formality. `N06` should produce a short design
+note on conflict resolution before implementation starts.
+
+**Exit criteria:** an external port scan finds no HTTP surface, PIN lockout is
+demonstrable, and a round-trip event edit reaches the parent's own calendar app.
+
+## Milestone 4 — Backup and resilience
+
+**Tickets:** `N08`, then `N09`
+**Blocked by:** nothing (`O03` is done)
+
+Can run in parallel with Milestone 2 or 3 — it touches the operations layer
+rather than the calendar or network layers, so file conflicts are unlikely.
+
+**Exit criteria:** a scheduled backup lands on USB and restores cleanly into an
+empty volume; the user's own cloud target works without any intermediary.
+
+## Milestone 5 — Deferred "sellable product" phase
+
+**Tickets:** `N10`, `N11`, `N12`
+Explicitly deferred per the source notes. Do not schedule until Milestones 1–3
+are stable.
+
+## Parallel track — personalization
+
+`PE05`, `PE06`, `PE07` are in progress; `PE08`–`PE10` planned. They are
+independent of everything above and continue on their own cadence. `N13` must
+not disturb the celebration or display-auth paths — that is an explicit
+acceptance criterion.
+
+## Risk register
+
+Data loss, migration failure, and existing-install compatibility are **not**
+risks on this project — see "Current deployment status". They are deliberately
+excluded from this register rather than mitigated.
+
+| Risk | Impact | Mitigation |
+| --- | --- | --- |
+| Mobile background limits make `N05` stale | Board silently wrong in the morning | `N14` CalDAV path is the freshness guarantee; staleness is surfaced in the UI |
+| `N05` needs a mobile app capability the repo lacks | Hidden scope explosion | Scope the delivery vehicle and report before building; split the ticket |
+| `O02` Pi hardware unavailable | Milestone 2 stalls indefinitely | Milestones 1 and 4 are hardware-independent; sequence them first |
+| Remote access widens attack surface | Household exposure | Tunnel-only, no public HTTP, PIN lockout, security review gate in `N07` |
+| CalDAV behaves inconsistently across providers | `N14` passes against one provider, fails against another | Fixture-based tests covering at least iCloud- and Nextcloud-shaped responses |
+| De-Googling touches 20+ files outside `sync/google` | Breakage in unrelated paths | Explicit acceptance criterion that kiosk, display auth, and celebration paths are untouched; CI gate |
+
+## Immediate next actions
+
+1. Start `N13` on `ticket/N13-retire-google-oauth`, amending migration 001
+   first so the rest of the removal has a clean schema to build against.
+2. Follow with `N14` on the same milestone.
+3. Push once Milestone 1's exit criteria are met.

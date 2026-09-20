@@ -1,6 +1,15 @@
 # ADR 0001: Phone-authorized Google Calendar OAuth for the headless server
 
-**Status:** Accepted (spike complete)
+> **Superseded on 2026-09-20 by
+> [ADR 0002](0002-provider-agnostic-calendar-access.md).** The Google-specific
+> OAuth layer described below is being removed: its prerequisites (a Google
+> Cloud project, a verified domain, trusted HTTPS, split-horizon DNS, a client
+> secret, and a vault passphrase) are unreachable for a non-technical
+> household, and they bind the product to a single calendar vendor. This
+> document is retained for historical context only. Do not implement against
+> it.
+
+**Status:** Superseded by ADR 0002 (was: Accepted, spike complete)
 
 **Date:** 2026-08-02
 **Decision owner:** OpenSkyLight server
