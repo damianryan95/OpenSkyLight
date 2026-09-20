@@ -33,20 +33,22 @@ These depended on a desktop runtime and have no headless equivalent:
   companion itself on port 8420. Replaced by `/admin/` on the server, with
   display enrolment links instead.
 
-## 3. Present in the UI but non-functional
+## 3. Present in the UI but non-functional — since fixed
 
-**This is the part worth your attention.** These features were never formally
-removed. Their interface still renders and a parent can still reach them, but
-the server has no handler, so they fail or silently return nothing. Found by
-diffing the 55 declared IPC channels against the 20 the server actually serves.
+These were never formally removed. Their interface still rendered and a parent
+could still reach them, but the server had no handler, so they failed or
+silently returned nothing. Found by diffing the 55 declared IPC channels
+against the 20 the server actually served.
 
-| Feature | What happens now | Where |
+**All five were restored on 2026-09-20 rather than hidden.**
+
+| Feature | Was | Now |
 | --- | --- | --- |
-| **News / RSS tile** | Still offered in the "Add tile" sheet. Calls `rss:getFeed`, which no server route handles, so the tile can never load. | `tiles.tsx:361` |
-| **Photo screensaver** | `screensaver:listPhotos` returns a hardcoded `[]`; `screensaver:pickFolder` is unhandled. The photo tile and screensaver have no photo source at all. | `router.ts:570` |
-| **ICS feed subscription from the kiosk** | The `IcsSection` still renders in kiosk settings and calls `ics:add`, which is unhandled. *(Note: ICS itself works — `N14` added it on the parent phone. Only this kiosk-side entry point is dead.)* | `SettingsSheet.tsx:322` |
-| **Weather city search** | `weather:searchCity` is unhandled, so the city picker cannot resolve a location. Weather itself works once a location is set in `/admin/`. | `hooks.ts:247` |
-| **Kiosk sync status row** | `sync:getStatus` returns a hardcoded `{ state: 'idle' }` rather than real sync health, so kiosk settings reports fiction while the connectivity pill reports the truth. | `router.ts:577` |
+| **News / RSS tile** | Offered in the "Add tile" sheet but `rss:getFeed` had no handler, so it could never load. | Upstream's RSS service ported to `src/server/domain/rss.ts`. Fetched server-side, so no display reaches the open internet and one fetch serves every screen. Stale headlines are served over an error. |
+| **Photo screensaver** | `screensaver:listPhotos` returned a hardcoded `[]`. No photo source existed. | Rebuilt on the `PE05` media pipeline: photos upload from the phone under **Planning → Family photos** and are served to displays with the same validation and credential checks as celebration media. Needed JPEG support, which celebrations never did. |
+| **Weather city search** | `weather:searchCity` had no handler, so the picker could not resolve a location. | Open-Meteo geocoding, fetched by the server. |
+| **Kiosk sync status row** | `sync:getStatus` returned a hardcoded `{ state: 'idle' }`. | Reports the real per-calendar state. |
+| **ICS feed subscription from the kiosk** | `IcsSection` rendered and called the unhandled `ics:add`. | **Deliberately not restored as a form.** Calendar sources are managed on the phone (`N14`) and a display is read-only (`K03`); the section now lists what is connected and points at the phone. |
 
 The other 30 unhandled channels are **correct** — they are write operations
 (`chores:create`, `lists:delete`, `people:update`, `rewards:grant`, …) that the
@@ -74,19 +76,20 @@ dark mode that follows the sun · customizable draggable/resizable tile
 dashboard · on-screen keyboard · the warm paper-planner visual design · timer
 tile.
 
-## 6. Suggested reading of this
+## 6. Where this landed
 
-Nothing in section 1 or 2 looks like an accident — those were deliberate calls,
-and the Electron losses are the price of the container model you wanted.
+Nothing in section 1 or 2 was an accident — those were deliberate calls, and
+the Electron losses are the price of the container model this fork wanted.
 
-**Section 3 is different.** Those are not decisions anyone made; they are loose
-ends from the re-platforming. A parent can add a News tile today and get a tile
-that never loads. That is worse than the feature being absent, because the
-product is advertising something it cannot do. Whatever you decide about
-restoring the features themselves, the dead entry points should either be wired
-up or taken out of the UI.
+Section 3 was different: loose ends from the re-platforming rather than
+decisions. A parent could add a News tile and get one that never loaded, which
+is worse than the feature being absent, because the product was advertising
+something it could not do. Those were fixed rather than hidden.
 
-The cheapest coherent option is to hide the unreachable entry points (News tile
-from the add sheet, ICS and weather-search sections from kiosk settings,
-screensaver photo picker) and let the audit stand as the record of what could
-return later. Restoring any of them is separate work with its own ticket.
+One item from section 1 has since been selected to return:
+**on-screen calendar editing**, as [`N15`](tickets/N15-on-screen-calendar-editing.md),
+scheduled behind `N06` because writing an event from a wall display only means
+something once the change reaches the calendar it came from.
+
+The rest of section 1 and 2 stands as the record of what could return later.
+Each would be its own ticket.
