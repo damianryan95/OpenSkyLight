@@ -154,30 +154,44 @@ export function createCalendarSourceService(
     if (calendars.length === 0) return { changed: false }
 
     const window = syncWindow(now())
-    const timezone = householdTimezone()
     let changed = false
     let failure: Error | null = null
 
-    for (const calendar of calendars) {
-      options.status?.start(calendar.id)
-      try {
-        const documents = row.kind === 'ics'
-          ? [await fetchIcsFeed(row.base_url!, fetcher)]
-          : (await clientFor(row).listEvents(calendar.source_calendar_id, window)).map((resource) => resource.data)
-        const events = documents.flatMap((document) => mapCalendarDocument(document, timezone))
-        const result = commitCalendarEvents(sqlite, calendar.id, events, now().toISOString())
-        changed = changed || result.changed
-        options.status?.succeed(calendar.id)
-      } catch (error) {
-        // One unreachable calendar must not abandon the others, and the cache
-        // it already holds stays exactly as it was.
-        options.status?.fail(calendar.id)
-        failure = error instanceof Error ? error : new Error('Calendar sync failed.')
+    // Resolving the household timezone can fail before the first parent setup
+    // completes. That must surface as a recorded sync error, not a silent
+    // no-op that leaves the board looking merely unsynced.
+    let timezone: string | null = null
+    try {
+      timezone = householdTimezone()
+    } catch {
+      failure = new Error('Set the household timezone before connecting a calendar.')
+    }
+
+    if (timezone !== null) {
+      for (const calendar of calendars) {
+        options.status?.start(calendar.id)
+        try {
+          const documents = row.kind === 'ics'
+            ? [await fetchIcsFeed(row.base_url!, fetcher)]
+            : (await clientFor(row).listEvents(calendar.source_calendar_id, window)).map((resource) => resource.data)
+          const events = documents.flatMap((document) => mapCalendarDocument(document, timezone!))
+          const result = commitCalendarEvents(sqlite, calendar.id, events, now().toISOString())
+          changed = changed || result.changed
+          options.status?.succeed(calendar.id)
+        } catch (error) {
+          // One unreachable calendar must not abandon the others, and the cache
+          // it already holds stays exactly as it was.
+          options.status?.fail(calendar.id)
+          failure = error instanceof Error ? error : new Error('Calendar sync failed.')
+        }
       }
     }
 
     const timestamp = now().toISOString()
-    const safeError = failure === null ? null : failure instanceof CalDavError ? failure.message : 'Calendar sync failed. Cached events are still available.'
+    const safeError = failure === null ? null
+      : failure instanceof CalDavError || failure instanceof DomainValidationError ? failure.message
+      : failure.message.startsWith('Set the household timezone') ? failure.message
+      : 'Calendar sync failed. Cached events are still available.'
     sqlite.prepare('UPDATE calendar_sources SET last_attempted_at = ?, last_succeeded_at = ?, last_error = ? WHERE id = ?')
       .run(timestamp, failure === null ? timestamp : row.last_succeeded_at, safeError, row.id)
     if (changed) options.onEventsChanged?.()
@@ -191,8 +205,12 @@ export function createCalendarSourceService(
       try {
         const result = await syncSource(source.id)
         changed = changed || result.changed
-      } catch {
-        // syncSource already recorded the per-source failure.
+      } catch (error) {
+        // syncSource records its own failures, so reaching here means it threw
+        // before it could. Record something rather than leaving the parent
+        // looking at a source that silently never syncs.
+        sqlite.prepare('UPDATE calendar_sources SET last_attempted_at = ?, last_error = ? WHERE id = ?')
+          .run(now().toISOString(), error instanceof DomainValidationError ? error.message : 'Calendar sync failed.', source.id)
       }
     }
     return { changed }

@@ -110,6 +110,21 @@ describe('calendar sources', () => {
     db.close()
   })
 
+  it('records a visible error when the household timezone is not set yet', async () => {
+    const db = database()
+    const sources = createCalendarSourceService(db.sqlite, () => { throw new Error('household timezone required') }, {
+      fetcher: icsFetcher(() => feed(dinner))
+    })
+    const source = await sources.connectIcs({ name: 'School', url: 'https://feeds.example.test/school.ics' })
+
+    await sources.syncSource(source.id)
+
+    // A silent no-op here would leave the parent staring at an empty board
+    // with nothing to act on.
+    expect(sources.list()[0]!.error).toMatch(/household timezone/i)
+    db.close()
+  })
+
   it('refuses to store a CalDAV account whose credentials do not work', async () => {
     const db = database()
     const fetcher = (async () => new Response('nope', { status: 401 })) as unknown as typeof fetch

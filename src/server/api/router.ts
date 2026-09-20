@@ -367,8 +367,8 @@ export async function handleApiRequest(request: IncomingMessage, response: Serve
     if (path === '/api/v1/calendar-sources/sync') {
       if (method !== 'POST') throw new ApiRequestError(405, 'method_not_allowed', `Method ${method} is not allowed`)
       requireParentMutation(auth, request)
-      requireSources(dependencies)
-      void dependencies.syncScheduler?.syncNow()
+      const sources = requireSources(dependencies)
+      if (dependencies.syncScheduler === undefined) { void sources.syncAll() } else { void dependencies.syncScheduler.syncNow() }
       response.writeHead(202); response.end(); return true
     }
 
