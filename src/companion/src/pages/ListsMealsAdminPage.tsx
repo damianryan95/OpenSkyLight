@@ -2,7 +2,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { DateTime } from 'luxon'
 import { useState, type FormEvent } from 'react'
 import type { ListKind, MealSlotKind } from '@shared/types'
-import { parentGet, parentMutation } from '../api/client'
+import { parentGet, parentMutation, parentUpload } from '../api/client'
 import { Card, CheckCircle, EmptyNote, GhostButton, PrimaryButton, TextInput } from '../components/ui'
 
 type ListItem = { id: string; text: string; checked: boolean; sortOrder: number }
@@ -34,6 +34,7 @@ export function ListsMealsAdminPage() {
       {lists.isPending ? <EmptyNote>Loading lists…</EmptyNote> : (lists.data?.lists ?? []).length === 0 ? <EmptyNote>Create a grocery, to-do, or custom list.</EmptyNote> : lists.data!.lists.map((list) => <ListCard key={list.id} list={list} busy={listCommand.isPending} command={(path, method, body) => listCommand.mutate({ path, method, body })} />)}
     </section>
     <section aria-labelledby="meal-templates-heading"><h3 id="meal-templates-heading" className="mb-1 font-display text-xl font-semibold">Weekly meal defaults</h3><p className="mb-3 text-sm font-semibold text-ink-faint">Pre-fill recurring meals such as Friday dinner. A dated meal overrides its weekly default.</p><MealTemplates templates={templates.data?.templates ?? []} busy={templateCommand.isPending} onSave={(dayOfWeek, slot, text) => templateCommand.mutate({ dayOfWeek, slot, text })} /></section>
+    <PhotosSection />
     <section aria-labelledby="meals-heading"><div className="mb-2 flex items-center justify-between gap-2"><h3 id="meals-heading" className="font-display text-xl font-semibold">Meal plan</h3><div className="flex gap-1"><GhostButton onClick={() => setWeekStart((day) => day.minus({ weeks: 1 }))}>←</GhostButton><GhostButton onClick={() => setWeekStart((day) => day.plus({ weeks: 1 }))}>→</GhostButton></div></div>
       <p className="mb-3 px-1 text-sm font-bold text-ink-faint">Week of {weekStart.toFormat('d LLL')}</p>
       <MealWeek start={weekStart} meals={meals.data?.meals ?? []} busy={mealCommand.isPending} onSave={(date, slot, text) => mealCommand.mutate({ date, slot, text })} />
@@ -71,4 +72,60 @@ function MealWeek({ start, meals, busy, onSave }: { start: DateTime; meals: Meal
   const [editing, setEditing] = useState<{ date: string; slot: MealSlotKind; text: string } | null>(null)
   const textFor = (date: string, slot: MealSlotKind) => meals.find((meal) => meal.date === date && meal.slot === slot)?.text ?? ''
   return <div className="space-y-3">{Array.from({ length: 7 }, (_, index) => { const day = start.plus({ days: index }); const date = day.toISODate()!; return <Card key={date}><h4 className="font-display text-lg font-semibold">{index === 0 ? 'Monday' : day.toFormat('cccc')} <span className="font-sans text-sm text-ink-faint">{day.toFormat('d LLL')}</span></h4>{SLOTS.map((slot) => { const current = textFor(date, slot); const active = editing?.date === date && editing.slot === slot; return <div key={slot} className="flex min-h-11 items-center gap-2 border-b border-line/60 last:border-0"><span className="w-20 shrink-0 text-xs font-extrabold uppercase text-ember">{slot}</span>{active ? <form className="flex flex-1 gap-2 py-1" onSubmit={(event) => { event.preventDefault(); onSave(date, slot, editing.text.trim() || null); setEditing(null) }}><TextInput value={editing.text} onChange={(text) => setEditing({ ...editing, text })} autoFocus placeholder="What's cooking?" /><PrimaryButton type="submit" disabled={busy}>Save</PrimaryButton></form> : <button type="button" className="pressable min-w-0 flex-1 py-2 text-left font-semibold" onClick={() => setEditing({ date, slot, text: current })}>{current || <span className="text-ink-faint">Add…</span>}</button>}</div> })}</Card> })}</div>
+}
+
+interface PhotoAsset { id: string; originalName: string; mediaType: string; byteSize: number; width: number; height: number }
+
+/**
+ * Family photos for the kiosk photo tile. Upstream pointed at a folder on the
+ * display; with browser kiosks there is no such folder, so photos live on the
+ * server and are uploaded from the phone like celebration media.
+ */
+function PhotosSection() {
+  const client = useQueryClient()
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const photos = useQuery({ queryKey: ['planning', 'photos'], queryFn: () => parentGet<{ assets: PhotoAsset[] }>('/api/v1/media/photos') })
+  const refresh = () => void client.invalidateQueries({ queryKey: ['planning', 'photos'] })
+
+  const add = async (files: FileList | null) => {
+    if (files === null || files.length === 0) return
+    setBusy(true); setError(null)
+    const results = await Promise.allSettled([...files].map((file) => parentUpload<PhotoAsset>('/api/v1/media/photos', file)))
+    const failure = results.find((result): result is PromiseRejectedResult => result.status === 'rejected')
+    if (failure !== undefined) setError(failure.reason instanceof Error ? failure.reason.message : 'That photo could not be added.')
+    refresh(); setBusy(false)
+  }
+
+  const remove = async (id: string) => {
+    setBusy(true); setError(null)
+    try { await parentMutation(`/api/v1/media/photos/${encodeURIComponent(id)}`, 'DELETE'); refresh() }
+    catch (reason) { setError(reason instanceof Error ? reason.message : 'That photo could not be removed.') }
+    finally { setBusy(false) }
+  }
+
+  const assets = photos.data?.assets ?? []
+  return <section aria-labelledby="photos-heading">
+    <h3 id="photos-heading" className="mb-1 font-display text-xl font-semibold">Family photos</h3>
+    <p className="mb-3 text-sm font-semibold text-ink-faint">Photos shown by the Photos tile on your displays. JPEG, PNG, and WebP up to 25 MB each.</p>
+    {error && <p role="alert" className="mb-2 rounded-xl bg-red-100 p-3 text-sm font-bold text-red-800">{error}</p>}
+    <Card>
+      <label className="block"><span className="mb-1 block text-sm font-extrabold">Add photos</span>
+        <input type="file" accept="image/jpeg,image/png,image/webp" multiple disabled={busy}
+          onChange={(event) => { void add(event.target.files); event.target.value = '' }}
+          className="block w-full text-sm font-semibold" />
+      </label>
+      {photos.isPending && <p className="mt-3 text-sm font-bold text-ink-faint">Loading photos…</p>}
+      {!photos.isPending && assets.length === 0 && <p className="mt-3 text-sm font-bold text-ink-faint">No photos yet. Add a few and they will appear on any display with a Photos tile.</p>}
+      {assets.length > 0 && <div className="mt-3 grid grid-cols-3 gap-2">
+        {assets.map((asset) => <div key={asset.id} className="relative">
+          <img src={`/api/v1/media/photos/${encodeURIComponent(asset.id)}/content`} alt={asset.originalName}
+            className="aspect-square w-full rounded-xl object-cover" />
+          <button type="button" aria-label={`Remove ${asset.originalName}`} disabled={busy}
+            onClick={() => void remove(asset.id)}
+            className="pressable absolute top-1 right-1 h-8 w-8 rounded-full bg-ink/70 font-extrabold text-paper">×</button>
+        </div>)}
+      </div>}
+    </Card>
+  </section>
 }

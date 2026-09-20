@@ -10,6 +10,7 @@ import type { CalendarSyncStatusService } from '../sync/status'
 import type { CalendarSourceService } from '../sync/sources'
 import type { SyncScheduler } from '../sync/scheduler'
 import type { OnlineIconSearchService } from '../icons'
+import type { RssService } from '../domain/rss'
 import { ApiRequestError, readBinaryBody, readJsonBody, sendApiError, sendJson, validateApiInput } from './http'
 
 export interface ApiRouterDependencies {
@@ -28,6 +29,7 @@ export interface ApiRouterDependencies {
   meals?: MealsDomain
   icons?: OnlineIconSearchService
   media?: MediaService
+  rss?: RssService
   /** Injectable clock for household-date authorization tests. */
   now?: () => Date
 }
@@ -156,6 +158,25 @@ export async function handleApiRequest(request: IncomingMessage, response: Serve
       if (dependencies.media === undefined) throw new ApiRequestError(503, 'service_unavailable', 'Celebration media is unavailable')
       if (method === 'GET') { requireParentRead(auth, request); sendJson(response, 200, { assets: dependencies.media.list() }); return true }
       if (method === 'POST') { requireParentMutation(auth, request); const asset = await dependencies.media.upload({ bytes: await readBinaryBody(request), contentType: readHeader(request, 'content-type'), originalName: readHeader(request, 'x-osl-file-name') }); sendJson(response, 201, asset); return true }
+      throw new ApiRequestError(405, 'method_not_allowed', `Method ${method} is not allowed`)
+    }
+    if (path === '/api/v1/media/photos') {
+      if (dependencies.media === undefined) throw new ApiRequestError(503, 'service_unavailable', 'Photo media is unavailable')
+      if (method === 'GET') { requireParentRead(auth, request); sendJson(response, 200, { assets: dependencies.media.listPhotos() }); return true }
+      if (method === 'POST') {
+        requireParentMutation(auth, request)
+        const asset = await dependencies.media.upload({ bytes: await readBinaryBody(request), contentType: readHeader(request, 'content-type'), originalName: readHeader(request, 'x-osl-file-name'), kind: 'photo' })
+        sendJson(response, 201, asset)
+        return true
+      }
+      throw new ApiRequestError(405, 'method_not_allowed', `Method ${method} is not allowed`)
+    }
+    const parentPhotoMatch = /^\/api\/v1\/media\/photos\/([^/]+)(?:\/(content))?$/.exec(path)
+    if (parentPhotoMatch !== null) {
+      if (dependencies.media === undefined) throw new ApiRequestError(503, 'service_unavailable', 'Photo media is unavailable')
+      const id = decodeURIComponent(parentPhotoMatch[1]); const content = parentPhotoMatch[2]
+      if (content === 'content' && method === 'GET') { requireParentRead(auth, request); return sendMedia(response, dependencies.media.file(id)) }
+      if (content === undefined && method === 'DELETE') { requireParentMutation(auth, request); await dependencies.media.remove(id); response.writeHead(204); response.end(); return true }
       throw new ApiRequestError(405, 'method_not_allowed', `Method ${method} is not allowed`)
     }
     const parentMediaMatch = /^\/api\/v1\/media\/celebrations\/([^/]+)(?:\/(content))?$/.exec(path)
@@ -567,7 +588,19 @@ async function handleDisplayReadRpc(
       return dependencies.meals.queries.getRange(input.start, input.end)
     }
     case 'weather:get': return fetchWeather(dependencies.settings.get().weather)
-    case 'screensaver:listPhotos': return []
+    case 'weather:searchCity': {
+      const { query } = await readJsonBody(request, z.object({ query: z.string().min(1).max(120) }).strict())
+      return searchCity(query)
+    }
+    case 'rss:getFeed': {
+      if (dependencies.rss === undefined) throw new ApiRequestError(503, 'service_unavailable', 'News is unavailable')
+      const { feedId } = await readJsonBody(request, z.object({ feedId: z.string().min(1).max(60) }).strict())
+      return dependencies.rss.getFeed(feedId)
+    }
+    case 'screensaver:listPhotos': {
+      if (dependencies.media === undefined) return []
+      return dependencies.media.listPhotos().map((photo: { id: string }) => `/api/v1/display/media/${encodeURIComponent(photo.id)}`)
+    }
     case 'auth:getStatus': return { pinSet: true, unlocked: (displayLayoutEditUntil.get(device.id) ?? 0) >= Date.now() }
     case 'auth:verifyPin': {
       const { pin } = await readJsonBody(request, pinRequestSchema)
@@ -575,7 +608,17 @@ async function handleDisplayReadRpc(
       catch (error) { if (error instanceof AuthError && error.status === 401) return { valid: false }; throw error }
     }
     case 'auth:lock': displayLayoutEditUntil.delete(device.id); return undefined
-    case 'sync:getStatus': return { state: 'idle', lastError: null, calendars: [] }
+    case 'sync:getStatus': {
+      // Previously a hardcoded 'idle', which reported fiction to the kiosk
+      // while the connectivity pill showed the real state.
+      const status = dependencies.syncStatus?.get()
+      if (status === undefined) return { state: 'idle', lastError: null, calendars: [] }
+      return {
+        state: status.state,
+        lastError: (status.calendars ?? []).find((calendar) => calendar.error !== null)?.error ?? null,
+        calendars: (status.calendars ?? []).map((calendar) => ({ id: calendar.id, name: calendar.name, error: calendar.error }))
+      }
+    }
     case 'chores:complete': return displayRpcChoreCommand(request, device.id, dependencies, 'complete')
     case 'chores:uncomplete': return displayRpcChoreCommand(request, device.id, dependencies, 'undo')
     default: throw new AuthError(403, 'forbidden', 'This display capability is read-only')
@@ -599,6 +642,26 @@ async function displayRpcChoreCommand(
 
 type WeatherSnapshot = { temperature: number; code: number; isDay: boolean; description: string; windSpeed: number; unit: 'f' | 'c'; label: string; daily: { date: string; code: number; high: number; low: number; precipProb: number | null }[]; fetchedAt: string }
 const weatherCache = new Map<string, { expiresAt: number; value: WeatherSnapshot }>()
+/** Open-Meteo geocoding: no API key, and the server fetches so displays do not. */
+async function searchCity(query: string): Promise<{ label: string; lat: number; lon: number }[]> {
+  const url = `https://geocoding-api.open-meteo.com/v1/search?name=${encodeURIComponent(query)}&count=8&language=en&format=json`
+  let response: Response
+  try {
+    response = await fetch(url, { signal: AbortSignal.timeout(10_000) })
+  } catch {
+    throw new ApiRequestError(503, 'service_unavailable', 'City search is unavailable right now.')
+  }
+  if (!response.ok) throw new ApiRequestError(503, 'service_unavailable', 'City search is unavailable right now.')
+  const body = await response.json() as {
+    results?: { name: string; admin1?: string; country?: string; latitude: number; longitude: number }[]
+  }
+  return (body.results ?? []).map((result) => ({
+    label: [result.name, result.admin1 ?? result.country].filter(Boolean).join(', '),
+    lat: result.latitude,
+    lon: result.longitude
+  }))
+}
+
 async function fetchWeather(location: { lat: number; lon: number; label: string } | null): Promise<WeatherSnapshot | null> {
   if (location === null) return null
   const key = `${location.lat},${location.lon}`; const cached = weatherCache.get(key)

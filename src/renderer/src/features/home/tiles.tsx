@@ -4,6 +4,7 @@ import { useQuery } from '@tanstack/react-query'
 import type { HomeTile } from '@shared/types'
 import { presetById } from '@shared/rss'
 import { agendaRange, dayRange, eachDay } from '@shared/dates'
+import { fetchDisplayMedia } from '../../api/browser'
 import { ipcInvoke } from '../../api/client'
 import {
   useBalances,
@@ -506,13 +507,26 @@ export function PhotoTile({ tile }: TileProps) {
     staleTime: 60_000
   })
   const [index, setIndex] = useState(0)
+  const [src, setSrc] = useState<string | null>(null)
   useEffect(() => {
     if (photos.length < 2) return
     const t = setInterval(() => setIndex((i) => (i + 1) % photos.length), 30_000)
     return () => clearInterval(t)
   }, [photos.length])
-  if (photos.length === 0) return <Placeholder>Pick a photo folder in Settings → General</Placeholder>
-  const src = photos[(index + tile.id.length) % photos.length]
+
+  const current = photos.length === 0 ? null : photos[(index + tile.id.length) % photos.length]
+  useEffect(() => {
+    if (current === null) { setSrc(null); return }
+    const controller = new AbortController()
+    let objectUrl: string | null = null
+    void fetchDisplayMedia(current, controller.signal)
+      .then((blob) => { if (!controller.signal.aborted) { objectUrl = URL.createObjectURL(blob); setSrc(objectUrl) } })
+      .catch(() => setSrc(null))
+    return () => { controller.abort(); if (objectUrl !== null) URL.revokeObjectURL(objectUrl) }
+  }, [current])
+
+  if (photos.length === 0) return <Placeholder>Add family photos from the parent phone, in Planning → Photos</Placeholder>
+  if (src === null) return <Placeholder>Loading photos…</Placeholder>
   return (
     <div className="-m-4 h-[calc(100%+2rem)] overflow-hidden">
       <img key={src} src={src} alt="" className="h-full w-full object-cover" style={{ animation: 'fade-in 1s ease backwards' }} />

@@ -15,7 +15,6 @@ import {
   useRedemptions,
   useRewardMutations,
   useRewards,
-  useIcsMutations,
   usePeople,
   usePeopleMutations,
   useSettings,
@@ -241,55 +240,36 @@ function SyncStatusRow() {
   )
 }
 
-function IcsSection() {
+/**
+ * Calendar sources are managed on the parent phone (N14), not here: a display
+ * is read-only by design (K03). This shows what is connected and points at the
+ * phone rather than offering a form the server will not accept.
+ */
+function CalendarSourcesSection() {
   const { data: calendars = [] } = useCalendars()
-  const calendarMutations = useCalendarMutations()
-  const ics = useIcsMutations()
-  const [url, setUrl] = useState('')
-  const [name, setName] = useState('')
-  const feeds = calendars.filter((c) => c.provider === 'ics')
-
-  const add = (): void => {
-    ics.add.mutate(
-      { url: url.trim(), name: name.trim() || 'Subscribed calendar', color: PERSON_COLORS[9] },
-      {
-        onSuccess: () => {
-          setUrl('')
-          setName('')
-        }
-      }
-    )
-  }
+  const feeds = calendars.filter((c) => c.provider === 'ics' || c.provider === 'caldav')
 
   return (
     <div>
-      <FieldLabel>Subscribed feeds (ICS)</FieldLabel>
+      <FieldLabel>Calendars</FieldLabel>
       <div className="flex flex-col gap-2">
         {feeds.map((c) => (
           <div key={c.id} className="flex items-center gap-3 rounded-2xl bg-paper-deep/50 p-3">
             <span className="h-6 w-6 rounded-full" style={{ backgroundColor: c.color }} />
             <span className="min-w-0 flex-1 truncate text-lg font-bold">{c.name}</span>
-            <Toggle
-              checked={c.visible}
-              onChange={(visible) => calendarMutations.update.mutate({ id: c.id, visible })}
-              label="Visible"
-            />
-            <button
-              type="button"
-              onClick={() => calendarMutations.remove.mutate({ id: c.id })}
-              className="pressable rounded-full border-2 border-ember-soft px-4 py-1.5 text-sm font-bold text-ember-deep"
-            >
-              Remove
-            </button>
+            <span className="shrink-0 text-sm font-extrabold text-ink-faint uppercase">
+              {c.provider === 'caldav' ? 'CalDAV' : 'Feed'}
+            </span>
           </div>
         ))}
-        <div className="flex flex-col gap-2 rounded-2xl bg-paper-deep/50 p-3 sm:flex-row">
-          <OskInput value={url} onChange={setUrl} placeholder="https://… .ics feed URL" className="flex-[2]" />
-          <OskInput value={name} onChange={setName} placeholder="Name" className="flex-1" />
-          <BigButton variant="ghost" onClick={add} disabled={!/^https?:\/\/.+/.test(url.trim()) || ics.add.isPending}>
-            Add
-          </BigButton>
-        </div>
+        {feeds.length === 0 && (
+          <p className="rounded-2xl bg-paper-deep/50 p-3 text-base font-semibold text-ink-soft">
+            No calendar is connected yet.
+          </p>
+        )}
+        <p className="px-1 text-sm font-semibold text-ink-faint">
+          Add or remove calendars from the parent phone, in Calendar. Displays show calendars but never change them.
+        </p>
       </div>
     </div>
   )
@@ -319,7 +299,7 @@ function CalendarsTab() {
   return (
     <div className="flex flex-col gap-6">
       <SyncStatusRow />
-      <IcsSection />
+      <CalendarSourcesSection />
       <div>
         <FieldLabel>Calendars on this display</FieldLabel>
         <div className="flex flex-col gap-2">

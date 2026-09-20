@@ -267,7 +267,7 @@ const migrations: readonly string[] = [
   `
     CREATE TABLE media_assets (
       id TEXT PRIMARY KEY,
-      kind TEXT NOT NULL CHECK (kind IN ('celebration', 'theme_background')),
+      kind TEXT NOT NULL CHECK (kind IN ('celebration', 'theme_background', 'photo')),
       original_name TEXT NOT NULL,
       media_type TEXT NOT NULL,
       byte_size INTEGER NOT NULL CHECK (byte_size >= 0),

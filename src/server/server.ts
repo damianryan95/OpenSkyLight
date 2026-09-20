@@ -8,6 +8,7 @@ import { DisplayDeviceService, HouseholdAuthService, PARENT_SESSION_COOKIE } fro
 import type { ServerDatabase } from './db'
 import { createChoresRewardsService, createDisplayReadService, createHouseholdSettingsService, createListsDomain, createMealsDomain, createPeopleService, createMediaService } from './domain'
 import { EventStream, type EventStreamAuthenticator } from './events'
+import { createRssService } from './domain/rss'
 import { createCalendarSyncStatusService } from './sync/status'
 import { createCalendarSourceService } from './sync/sources'
 import { createSyncScheduler } from './sync/scheduler'
@@ -93,7 +94,7 @@ export function createHeadlessServer(options: HeadlessServerOptions = {}): Headl
         return device === undefined ? undefined : { type: 'display' as const, id: device.id }
       }
     }),
-    ...(auth === undefined || displays === undefined || settings === undefined || chores === undefined || people === undefined || syncStatus === undefined || displayRead === undefined || lists === undefined || meals === undefined ? {} : { auth, displays, settings, chores, people, media, syncStatus, calendarSources, syncScheduler, displayRead, lists, meals, icons: createOnlineIconSearchService() })
+    ...(auth === undefined || displays === undefined || settings === undefined || chores === undefined || people === undefined || syncStatus === undefined || displayRead === undefined || lists === undefined || meals === undefined ? {} : { auth, displays, settings, chores, people, media, syncStatus, calendarSources, syncScheduler, rss: createRssService(), displayRead, lists, meals, icons: createOnlineIconSearchService() })
   }, options.staticDir, options.companionStaticDir)
   let started: StartedHeadlessServer | undefined
 

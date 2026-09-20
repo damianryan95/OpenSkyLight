@@ -86,7 +86,7 @@ export const TILE_REGISTRY: Record<HomeTileType, TileMeta> = {
   },
   photo: {
     label: 'Photo',
-    description: 'Cycling photos from your screensaver folder',
+    description: 'Cycling family photos added from the parent phone',
     component: PhotoTile
   },
   news: {

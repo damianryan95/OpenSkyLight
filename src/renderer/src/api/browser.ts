@@ -32,12 +32,18 @@ export function displayCredential(): string | null { return localStorage.getItem
 export function displayId(): string | null { return localStorage.getItem(DISPLAY_ID_KEY) }
 
 /** Fetch assigned celebration bytes with the display credential, never in a URL. */
-export async function fetchDisplayCelebration(assetId: string, signal?: AbortSignal): Promise<Blob> {
+/** Display media needs a Bearer credential, which an <img src> cannot send, so
+ * every image is fetched as a blob and shown through an object URL. */
+export async function fetchDisplayMedia(path: string, signal?: AbortSignal): Promise<Blob> {
   const credential = displayCredential()
   if (credential === null) throw new BrowserIpcError('unauthorized', 'Display is not registered')
-  const response = await fetch(`/api/v1/display/media/${encodeURIComponent(assetId)}`, { headers: { Authorization: `Bearer ${credential}` }, signal, cache: 'no-store' })
-  if (!response.ok) throw new BrowserIpcError('media_unavailable', 'Celebration media is unavailable')
+  const response = await fetch(path, { headers: { Authorization: `Bearer ${credential}` }, signal, cache: 'no-store' })
+  if (!response.ok) throw new BrowserIpcError('media_unavailable', 'Display media is unavailable')
   return response.blob()
+}
+
+export async function fetchDisplayCelebration(assetId: string, signal?: AbortSignal): Promise<Blob> {
+  return fetchDisplayMedia(`/api/v1/display/media/${encodeURIComponent(assetId)}`, signal)
 }
 
 /** The browser kiosk reads the richer server sync-health document directly.
