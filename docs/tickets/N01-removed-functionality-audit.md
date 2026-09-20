@@ -1,6 +1,6 @@
 # N01 - Audit functionality removed from the upstream project
 
-Status: ready
+Status: done
 Depends on: (none)
 
 ## Context
@@ -32,3 +32,10 @@ Likely files: new `docs/removed-functionality-audit.md`.
 
 Verify: manual cross-check against the ticket files above and the upstream
 repository at tag `v0.8.0`.
+
+Result (2026-09-20): [`docs/removed-functionality-audit.md`](../removed-functionality-audit.md).
+Beyond the expected `C01`–`C03` removals, the audit found five features whose
+UI is still reachable but whose server handlers do not exist — most visibly the
+News tile, which a parent can still add and which can never load. Those are
+loose ends from the headless re-platforming rather than decisions, and are
+listed separately in section 3 for a restore-or-remove call.
