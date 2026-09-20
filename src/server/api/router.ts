@@ -1,13 +1,12 @@
 import type { IncomingMessage, ServerResponse } from 'node:http'
 import { z } from 'zod'
 import { DateTime } from 'luxon'
-import { addListItemRequestSchema, apiContract, apiInfoResponseSchema, choreCorrectionRequestSchema, configureGoogleRequestSchema, createChoreRequestSchema, createListRequestSchema, createPersonRequestSchema, createRewardRequestSchema, displayChoreCommandRequestSchema, mealRangeRequestSchema, mealSlotKindSchema, redeemRewardRequestSchema, registerDisplayRequestSchema, setCalendarSelectionRequestSchema, setMealRequestSchema, setMealTemplateRequestSchema, starAdjustmentRequestSchema, updateChoreRequestSchema, updateDisplayRequestSchema, updateHouseholdSettingsRequestSchema, updateListRequestSchema, updatePersonRequestSchema, updateRewardRequestSchema } from '../../shared/api/contract'
+import { addListItemRequestSchema, apiContract, apiInfoResponseSchema, choreCorrectionRequestSchema, createChoreRequestSchema, createListRequestSchema, createPersonRequestSchema, createRewardRequestSchema, displayChoreCommandRequestSchema, mealRangeRequestSchema, mealSlotKindSchema, redeemRewardRequestSchema, registerDisplayRequestSchema, setMealRequestSchema, setMealTemplateRequestSchema, starAdjustmentRequestSchema, updateChoreRequestSchema, updateDisplayRequestSchema, updateHouseholdSettingsRequestSchema, updateListRequestSchema, updatePersonRequestSchema, updateRewardRequestSchema } from '../../shared/api/contract'
 import { AuthError, CSRF_HEADER, DisplayDeviceService, HouseholdAuthService, PARENT_SESSION_COOKIE } from '../auth'
 import { type ChoresRewardsService, type DisplayReadService, type HouseholdSettingsService, type ListsDomain, type MealsDomain, type PeopleService, type MediaService } from '../domain'
 import { createReadStream } from 'node:fs'
 import type { EventStream, EventStreamAuthenticator } from '../events'
-import type { GoogleConfigurationVault, GoogleConnectionService, GoogleSyncScheduler } from '../sync/google'
-import type { GoogleSyncStatusService } from '../sync/google'
+import type { CalendarSyncStatusService } from '../sync/status'
 import type { OnlineIconSearchService } from '../icons'
 import { ApiRequestError, readBinaryBody, readJsonBody, sendApiError, sendJson, validateApiInput } from './http'
 
@@ -19,10 +18,7 @@ export interface ApiRouterDependencies {
   chores?: ChoresRewardsService
   settings?: HouseholdSettingsService
   people?: PeopleService
-  google?: GoogleConnectionService
-  googleConfiguration?: GoogleConfigurationVault
-  googleSyncStatus?: GoogleSyncStatusService
-  googleSyncScheduler?: GoogleSyncScheduler
+  syncStatus?: CalendarSyncStatusService
   displayRead?: DisplayReadService
   lists?: ListsDomain
   meals?: MealsDomain
@@ -60,8 +56,8 @@ export async function handleApiRequest(request: IncomingMessage, response: Serve
     }
     if (path === apiContract.syncStatus.path) {
       if (method !== apiContract.syncStatus.method) throw new ApiRequestError(405, 'method_not_allowed', `Method ${method} is not allowed`)
-      if (dependencies.googleSyncStatus === undefined) throw new ApiRequestError(503, 'service_unavailable', 'Google sync status is unavailable')
-      sendJson(response, 200, apiContract.syncStatus.response.parse(dependencies.googleSyncStatus.get()))
+      if (dependencies.syncStatus === undefined) throw new ApiRequestError(503, 'service_unavailable', 'Calendar sync status is unavailable')
+      sendJson(response, 200, apiContract.syncStatus.response.parse(dependencies.syncStatus.get()))
       return true
     }
     if (path.startsWith('/api/v1/auth/') && auth === undefined) {
@@ -337,81 +333,6 @@ export async function handleApiRequest(request: IncomingMessage, response: Serve
       dependencies.meals.parentCommands.set(date, slot, text)
       publishInvalidation(dependencies, ['meals'])
       response.writeHead(204); response.end(); return true
-    }
-
-    if (path === '/api/v1/google/configuration') {
-      if (dependencies.googleConfiguration === undefined) throw new ApiRequestError(503, 'service_unavailable', 'Google configuration is unavailable')
-      if (method === 'GET') { requireParentRead(auth, request); sendJson(response, 200, dependencies.googleConfiguration.status()); return true }
-      if (method === 'PUT') { requireParentMutation(auth, request); sendJson(response, 201, dependencies.googleConfiguration.configure(await readJsonBody(request, configureGoogleRequestSchema))); return true }
-      throw new ApiRequestError(405, 'method_not_allowed', `Method ${method} is not allowed`)
-    }
-    const google = dependencies.google ?? dependencies.googleConfiguration?.get()
-    if (path === '/api/v1/google/accounts') {
-      if (google === undefined) throw new ApiRequestError(503, 'service_unavailable', 'Google Calendar is not configured or its vault is locked')
-      if (method !== 'GET') throw new ApiRequestError(405, 'method_not_allowed', `Method ${method} is not allowed`)
-      requireParentRead(auth, request)
-      sendJson(response, 200, { accounts: google.listAccounts() })
-      return true
-    }
-
-    if (path === '/api/v1/google/connect') {
-      if (google === undefined) throw new ApiRequestError(503, 'service_unavailable', 'Google Calendar is not configured or its vault is locked')
-      if (method !== 'POST') throw new ApiRequestError(405, 'method_not_allowed', `Method ${method} is not allowed`)
-      requireParentMutation(auth, request)
-      const sessionToken = readCookie(request, PARENT_SESSION_COOKIE)!
-      sendJson(response, 201, google.startConnection(sessionToken))
-      return true
-    }
-
-    if (path === '/api/v1/google/sync') {
-      if (method !== 'POST') throw new ApiRequestError(405, 'method_not_allowed', `Method ${method} is not allowed`)
-      requireParentMutation(auth, request)
-      if (dependencies.googleSyncScheduler === undefined) throw new ApiRequestError(503, 'service_unavailable', 'Google calendar synchronization is unavailable')
-      void dependencies.googleSyncScheduler.syncNow('manual')
-      response.writeHead(202)
-      response.end()
-      return true
-    }
-
-    if (path === '/api/v1/google/callback') {
-      if (google === undefined) throw new ApiRequestError(503, 'service_unavailable', 'Google Calendar is not configured or its vault is locked')
-      if (method !== 'GET') throw new ApiRequestError(405, 'method_not_allowed', `Method ${method} is not allowed`)
-      const sessionToken = readCookie(request, PARENT_SESSION_COOKIE)
-      requireParentRead(auth, request)
-      const code = url.searchParams.get('code')
-      const state = url.searchParams.get('state')
-      if (!code || !state) throw new ApiRequestError(400, 'bad_request', 'Google authorization response is incomplete')
-      await google.completeConnection({ parentSessionId: sessionToken!, state, code })
-      response.writeHead(302, { location: '/admin/?google=connected' })
-      response.end()
-      return true
-    }
-
-    const googleAccountMatch = /^\/api\/v1\/google\/accounts\/([^/]+)(?:\/(calendars))?$/.exec(path)
-    if (googleAccountMatch !== null) {
-      if (google === undefined) throw new ApiRequestError(503, 'service_unavailable', 'Google Calendar is not configured or its vault is locked')
-      const accountId = decodeURIComponent(googleAccountMatch[1])
-      const calendars = googleAccountMatch[2] === 'calendars'
-      if (calendars && method === 'GET') {
-        requireParentRead(auth, request)
-        sendJson(response, 200, { calendars: await google.listRemoteCalendars(accountId) })
-        return true
-      }
-      if (calendars && method === 'PUT') {
-        requireParentMutation(auth, request)
-        const input = await readJsonBody(request, setCalendarSelectionRequestSchema)
-        google.setCalendarSelection({ accountId, ...input })
-        if (input.selected) void dependencies.googleSyncScheduler?.syncNow('selection')
-        response.writeHead(204)
-        response.end()
-        return true
-      }
-      if (!calendars && method === 'DELETE') {
-        requireParentMutation(auth, request)
-        sendJson(response, 200, await google.disconnect(accountId))
-        return true
-      }
-      throw new ApiRequestError(405, 'method_not_allowed', `Method ${method} is not allowed`)
     }
 
     if (path === '/api/v1/displays') {
@@ -697,9 +618,8 @@ function readBearerToken(request: IncomingMessage): string | undefined {
 
 function setParentSessionCookie(response: ServerResponse, request: IncomingMessage, token: string, expiresAt: string): void {
   const secure = readHeader(request, 'x-forwarded-proto') === 'https' ? '; Secure' : ''
-  // Lax keeps the cookie off cross-site subrequests and POSTs, while allowing
-  // Google's top-level GET redirect to return to the OAuth callback with the
-  // parent session that initiated the state-bound PKCE flow.
+  // Lax keeps the cookie off cross-site subrequests and POSTs while still
+  // surviving an ordinary top-level navigation back into the admin app.
   response.setHeader('set-cookie', `${PARENT_SESSION_COOKIE}=${token}; Path=/api/v1; HttpOnly; SameSite=Lax${secure}; Expires=${new Date(expiresAt).toUTCString()}`)
 }
 

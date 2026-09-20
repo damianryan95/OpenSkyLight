@@ -41,7 +41,8 @@ export function ConnectivityStatus() {
   if (!isDisplayClient()) return null
   let message: string | null = null
   if (connection !== 'live') message = connection === 'connecting' ? 'Connecting to server…' : 'Reconnecting to server…'
-  else if (sync.state === 'never_synced') message = 'Google calendar has not synced yet'
+  else if (sync.state === 'not_configured') message = 'No calendar is connected yet'
+  else if (sync.state === 'never_synced') message = 'Calendar has not synced yet'
   else if (sync.state === 'stale' || sync.state === 'failed' || sync.state === 'error') {
     message = describeLastSuccess(sync) === null ? 'Calendar data may be out of date' : `Calendar data may be out of date · ${describeLastSuccess(sync)}`
   }

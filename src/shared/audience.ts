@@ -34,7 +34,7 @@ export function normalizeAudienceText(value: string): string {
   return value.normalize('NFKC').trim().replace(/\s+/gu, ' ').toLowerCase()
 }
 
-/** Remove Google-style description markup while retaining word boundaries. */
+/** Remove HTML description markup while retaining word boundaries. */
 export function cleanAudienceDescription(value: string): string {
   return normalizeAudienceText(
     decodeHtmlEntities(

@@ -22,7 +22,7 @@ type SectionId = 'home' | 'household' | 'calendar' | 'chores' | 'planning' | 'di
 const SECTIONS: { id: SectionId; label: string; description: string; icon: string }[] = [
   { id: 'home', label: 'Home', description: 'Household administration', icon: '⌂' },
   { id: 'household', label: 'Household', description: 'People and household roles', icon: '⌘' },
-  { id: 'calendar', label: 'Calendar', description: 'Google accounts and calendars', icon: '□' },
+  { id: 'calendar', label: 'Calendar', description: 'Connected calendars', icon: '□' },
   { id: 'chores', label: 'Chores', description: 'Chores, rewards, and corrections', icon: '★' },
   { id: 'planning', label: 'Planning', description: 'Lists and meals', icon: '✓' },
   { id: 'displays', label: 'Displays', description: 'Registered screens and diagnostics', icon: '▤' }

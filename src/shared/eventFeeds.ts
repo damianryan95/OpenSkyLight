@@ -1,4 +1,4 @@
-/** A read-only cached Google occurrence returned by Family and personal feeds. */
+/** A read-only cached calendar occurrence returned by Family and personal feeds. */
 export interface EventFeedOccurrence {
   /** Stable recurrence key: `${eventId}|${occurrenceStart}`. */
   key: string
@@ -14,7 +14,7 @@ export interface EventFeedOccurrence {
   allDay: boolean
   isRecurring: boolean
   occurrenceStart: string
-  /** Calculated from current people, calendar mapping, and Google event text. */
+  /** Calculated from current people, calendar mapping, and event text. */
   personIds: string[]
 }
 

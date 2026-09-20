@@ -1,6 +1,6 @@
 import { DateTime } from 'luxon'
 
-/** Google occasionally supplies fixed offsets such as GMT+08:00, while Luxon
+/** Calendar providers occasionally supply fixed offsets such as GMT+08:00, while Luxon
  * accepts their equivalent UTC+08:00 form rather than the GMT spelling. */
 export function normalizeTimeZone(value: string | null | undefined, fallback = 'UTC'): string {
   const raw = value?.trim() || fallback

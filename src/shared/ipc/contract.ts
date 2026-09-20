@@ -47,29 +47,6 @@ export type IpcContract = {
   'events:getOccurrences': { req: { start: string; end: string }; res: OccurrenceDto[] }
   'events:get': { req: { id: string }; res: EventDto | null }
 
-  'google:getStatus': {
-    req: void
-    res: { configured: boolean; accounts: { id: string; email: string; error: string | null }[] }
-  }
-  'google:setCredentials': { req: { clientId: string; clientSecret: string }; res: void }
-  'google:connect': { req: void; res: { email: string } }
-  'google:disconnect': { req: { accountId: string }; res: void }
-  'google:listRemoteCalendars': {
-    req: { accountId: string }
-    res: { id: string; name: string; color: string; primary: boolean; readOnly: boolean; selected: boolean }[]
-  }
-  'google:setCalendarSelected': {
-    req: {
-      accountId: string
-      googleCalendarId: string
-      name: string
-      color: string
-      readOnly: boolean
-      selected: boolean
-    }
-    res: void
-  }
-
   'ics:add': { req: { url: string; name: string; color: string }; res: CalendarDto }
 
   'chores:list': { req: void; res: ChoreDto[] }
@@ -173,7 +150,6 @@ export const ALLOWED_CHANNEL_PREFIXES = [
   'people:',
   'calendars:',
   'events:',
-  'google:',
   'ics:',
   'sync:',
   'weather:',

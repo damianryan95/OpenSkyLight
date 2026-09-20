@@ -8,7 +8,7 @@ export type { EventFeedOccurrence, EventFeedWindow } from '../../shared/eventFee
 interface EventRow {
   id: string
   calendar_id: string
-  google_event_id: string
+  source_event_id: string
   title: string
   description: string | null
   location: string | null
@@ -69,16 +69,16 @@ function assertWindow(window: EventFeedWindow): void {
 }
 
 /**
- * Read-only event queries over the Google cache. Audience associations are
+ * Read-only event queries over the cached event store. Audience associations are
  * deliberately evaluated at read time, so a child rename immediately changes
- * name inference without touching cached Google events.
+ * name inference without touching cached events.
  */
 export function createEventFeedService(sqlite: Database.Database) {
   const peopleStatement = sqlite.prepare<[], AudiencePerson>(`
     SELECT id, name, role FROM people WHERE deleted_at IS NULL ORDER BY sort_order, created_at
   `)
   const eventStatement = sqlite.prepare<[], EventRow>(`
-    SELECT e.id, e.calendar_id, e.google_event_id, e.title, e.description, e.location,
+    SELECT e.id, e.calendar_id, e.source_event_id, e.title, e.description, e.location,
            e.start_at, e.end_at, e.timezone, e.all_day, e.recurrence, e.recurrence_exdates,
            e.recurrence_rdates, e.recurring_event_id, e.original_start_at, e.status,
            c.audience_person_id
@@ -93,11 +93,11 @@ export function createEventFeedService(sqlite: Database.Database) {
     const people = peopleStatement.all()
     const rows = eventStatement.all()
     const masters = rows.filter((row) => row.recurring_event_id === null && row.status === 'confirmed')
-    const masterByGoogleKey = new Map(masters.map((row) => [`${row.calendar_id}\u0000${row.google_event_id}`, row]))
+    const masterBySourceKey = new Map(masters.map((row) => [`${row.calendar_id}\u0000${row.source_event_id}`, row]))
     const exceptionsByMaster = new Map<string, EventRow[]>()
     for (const row of rows) {
       if (row.recurring_event_id === null) continue
-      const master = masterByGoogleKey.get(`${row.calendar_id}\u0000${row.recurring_event_id}`)
+      const master = masterBySourceKey.get(`${row.calendar_id}\u0000${row.recurring_event_id}`)
       if (master === undefined) continue // A partial cache cannot safely expand an orphaned exception.
       const exceptions = exceptionsByMaster.get(master.id) ?? []
       exceptions.push(row)
@@ -118,7 +118,7 @@ export function createEventFeedService(sqlite: Database.Database) {
         expanded = expandOccurrences(asMaster(master), exceptions, window.start, window.end)
       } catch {
         // A malformed upstream event must not make the whole household feed
-        // unavailable; the next Google pull can correct or remove it.
+        // unavailable; the next sync can correct or remove it.
         continue
       }
       for (const occurrence of expanded) {

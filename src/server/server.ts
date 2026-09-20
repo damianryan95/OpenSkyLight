@@ -8,7 +8,7 @@ import { DisplayDeviceService, HouseholdAuthService, PARENT_SESSION_COOKIE } fro
 import type { ServerDatabase } from './db'
 import { createChoresRewardsService, createDisplayReadService, createHouseholdSettingsService, createListsDomain, createMealsDomain, createPeopleService, createMediaService } from './domain'
 import { EventStream, type EventStreamAuthenticator } from './events'
-import { createGoogleSyncScheduler, createGoogleSyncStatusService, GoogleConfigurationVault, type GoogleConnectionService } from './sync/google'
+import { createCalendarSyncStatusService } from './sync/status'
 import { safeLogErrorMessage } from './logging'
 import { createOnlineIconSearchService } from './icons'
 
@@ -24,8 +24,6 @@ export interface HeadlessServerOptions {
   companionStaticDir?: string
   /** Persistent server-owned location for celebration media. */
   mediaDir?: string
-  /** Optional until an operator mounts the Google OAuth secrets. */
-  google?: GoogleConnectionService
 }
 
 export interface StartedHeadlessServer {
@@ -53,14 +51,8 @@ export function createHeadlessServer(options: HeadlessServerOptions = {}): Headl
   const settings = options.database === undefined ? undefined : createHouseholdSettingsService(options.database.sqlite)
   const people = options.database === undefined ? undefined : createPeopleService(options.database.sqlite)
   const media = options.database === undefined || options.mediaDir === undefined ? undefined : createMediaService(options.database.sqlite, options.mediaDir)
-  const googleConfiguration = options.database === undefined ? undefined : new GoogleConfigurationVault(options.database.sqlite)
-  const googleSyncStatus = options.database === undefined ? undefined : createGoogleSyncStatusService(options.database.sqlite, {
+  const syncStatus = options.database === undefined ? undefined : createCalendarSyncStatusService(options.database.sqlite, {
     publish: (data) => eventStream.publish({ type: 'sync.status', data })
-  })
-  const googleSyncScheduler = options.database === undefined || settings === undefined || googleConfiguration === undefined || googleSyncStatus === undefined ? undefined : createGoogleSyncScheduler({
-    sqlite: options.database.sqlite,
-    getSynchronizer: () => googleConfiguration.getPullSynchronizer(() => settings.get().timezone, googleSyncStatus),
-    onEventsChanged: () => eventStream.publish({ type: 'query.invalidated', data: { resources: ['events'] } })
   })
   const chores = options.database === undefined ? undefined : createChoresRewardsService(options.database.sqlite, undefined, (event) => {
     eventStream.publish({
@@ -93,9 +85,7 @@ export function createHeadlessServer(options: HeadlessServerOptions = {}): Headl
         return device === undefined ? undefined : { type: 'display' as const, id: device.id }
       }
     }),
-    ...(auth === undefined || displays === undefined || settings === undefined || chores === undefined || people === undefined || googleSyncStatus === undefined || displayRead === undefined || lists === undefined || meals === undefined ? {} : { auth, displays, settings, chores, people, media, googleSyncStatus, googleSyncScheduler, displayRead, lists, meals, icons: createOnlineIconSearchService() }),
-    ...(options.google === undefined ? {} : { google: options.google }),
-    ...(googleConfiguration === undefined ? {} : { googleConfiguration })
+    ...(auth === undefined || displays === undefined || settings === undefined || chores === undefined || people === undefined || syncStatus === undefined || displayRead === undefined || lists === undefined || meals === undefined ? {} : { auth, displays, settings, chores, people, media, syncStatus, displayRead, lists, meals, icons: createOnlineIconSearchService() })
   }, options.staticDir, options.companionStaticDir)
   let started: StartedHeadlessServer | undefined
 
@@ -112,12 +102,10 @@ export function createHeadlessServer(options: HeadlessServerOptions = {}): Headl
 
       const publicHost = address.address.includes(':') ? `[${address.address}]` : address.address
       started = { host: address.address, port: address.port, url: `http://${publicHost}:${address.port}` }
-      googleSyncScheduler?.start()
       return started
     },
     async stop(): Promise<void> {
       if (!httpServer.listening) return
-      googleSyncScheduler?.stop()
       httpServer.close()
       await once(httpServer, 'close')
       options.database?.close()

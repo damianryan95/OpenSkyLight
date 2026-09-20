@@ -51,7 +51,7 @@ export const displayChoreCommandResponseSchema = z.object({
   created: z.boolean()
 })
 
-/** Parent-admin people and read-only Google calendar configuration DTOs. */
+/** Parent-admin people and calendar configuration DTOs. */
 export const householdRoleSchema = z.enum(['parent', 'child'])
 export const personThemeIdSchema = z.enum(BUILT_IN_PERSON_THEME_IDS)
 export const personPersonalizationSchema = z.object({
@@ -74,9 +74,15 @@ export const createPersonRequestSchema = personSchema.pick({ name: true, color: 
 export const updatePersonRequestSchema = createPersonRequestSchema.partial().extend({ sortOrder: z.number().int().nonnegative().optional(), avatarData: z.string().max(1_500_000).nullable().optional() })
   .refine((value) => Object.keys(value).length > 0, { message: 'At least one person field is required' })
 
-export const googleAccountSchema = z.object({
-  id: z.string().min(1), email: z.string().min(1), state: z.enum(['connected', 'reauthorization_required']),
-  error: z.string().nullable(), connectedAt: z.string().datetime()
+/** A connected calendar provider: a CalDAV account, ICS feed, or phone. */
+export const calendarSourceKindSchema = z.enum(['caldav', 'ics', 'phone'])
+export const calendarSourceSchema = z.object({
+  id: z.string().min(1),
+  kind: calendarSourceKindSchema,
+  name: z.string().min(1),
+  connectedAt: z.string().datetime(),
+  lastSucceededAt: z.string().datetime().nullable(),
+  error: z.string().nullable()
 })
 export const remoteCalendarSchema = z.object({
   id: z.string().min(1), name: z.string().min(1), color: z.string().min(1), primary: z.boolean(), readOnly: z.boolean()
@@ -87,8 +93,6 @@ export const setCalendarSelectionRequestSchema = z.object({
   selected: z.boolean(),
   audiencePersonId: z.string().min(1).nullable()
 }).strict()
-export const googleConfigurationSchema = z.object({ configured: z.boolean(), unlocked: z.boolean(), redirectUri: z.string().url().nullable() })
-export const configureGoogleRequestSchema = z.object({ clientId: z.string().min(1), clientSecret: z.string().min(1), publicUrl: z.string().url() }).strict()
 export const householdSettingsSchema = z.object({ timezone: z.string().min(1), weather: z.object({ lat: z.number().min(-90).max(90), lon: z.number().min(-180).max(180), label: z.string().min(1).max(120) }).nullable() })
 export const updateHouseholdSettingsRequestSchema = householdSettingsSchema.pick({ timezone: true, weather: true }).partial()
   .refine((value) => Object.keys(value).length > 0, { message: 'At least one household setting is required' })
@@ -152,7 +156,7 @@ export const queryInvalidationEventSchema = z.object({
 })
 
 export const syncStatusEventSchema = z.object({
-  state: z.enum(['never_synced', 'fresh', 'stale', 'syncing', 'failed', 'idle', 'healthy', 'error']),
+  state: z.enum(['not_configured', 'never_synced', 'fresh', 'stale', 'syncing', 'failed', 'idle', 'healthy', 'error']),
   lastSyncedAt: z.string().datetime().nullable(),
   lastAttemptAt: z.string().datetime().nullable().optional(),
   lastSucceededAt: z.string().datetime().nullable().optional(),
@@ -241,7 +245,7 @@ export type SyncStatus = z.infer<typeof syncStatusEventSchema>
 export type DisplayDevice = z.infer<typeof displayDeviceSchema>
 export type RegisteredDisplay = z.infer<typeof registeredDisplaySchema>
 export type PersonDto = z.infer<typeof personSchema>
-export type GoogleAccountDto = z.infer<typeof googleAccountSchema>
+export type CalendarSourceDto = z.infer<typeof calendarSourceSchema>
 export type DiscoveredCalendarDto = z.infer<typeof discoveredCalendarSchema>
 export type ListAdminDto = z.infer<typeof listSchema>
 export type MealSlotAdminDto = z.infer<typeof mealSlotSchema>

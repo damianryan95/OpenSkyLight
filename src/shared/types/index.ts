@@ -35,7 +35,7 @@ export interface PersonUpdateInput {
   celebrationDurationMs?: number
 }
 
-export type CalendarProvider = 'local' | 'google' | 'ics'
+export type CalendarProvider = 'local' | 'caldav' | 'ics' | 'phone'
 
 export interface CalendarDto {
   id: string

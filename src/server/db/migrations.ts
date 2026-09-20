@@ -19,20 +19,24 @@ const migrations: readonly string[] = [
       deleted_at TEXT
     );
 
-    CREATE TABLE google_accounts (
+    -- A connected calendar provider. Provider-agnostic by design: CalDAV
+    -- collections, read-only ICS feeds, and phone-native pushes all register
+    -- here. Credentials belong to the source implementation, not this table.
+    CREATE TABLE calendar_sources (
       id TEXT PRIMARY KEY,
-      email TEXT NOT NULL UNIQUE,
-      refresh_token_enc BLOB NOT NULL,
-      scopes TEXT NOT NULL,
+      kind TEXT NOT NULL CHECK (kind IN ('caldav', 'ics', 'phone')),
+      name TEXT NOT NULL,
       connected_at TEXT NOT NULL,
-      last_refresh_error TEXT,
-      last_refreshed_at TEXT
+      last_attempted_at TEXT,
+      last_succeeded_at TEXT,
+      last_error TEXT,
+      deleted_at TEXT
     );
 
     CREATE TABLE calendars (
       id TEXT PRIMARY KEY,
-      google_account_id TEXT NOT NULL REFERENCES google_accounts(id) ON DELETE CASCADE,
-      google_calendar_id TEXT NOT NULL,
+      source_id TEXT NOT NULL REFERENCES calendar_sources(id) ON DELETE CASCADE,
+      source_calendar_id TEXT NOT NULL,
       audience_person_id TEXT REFERENCES people(id) ON DELETE SET NULL,
       name TEXT NOT NULL,
       color TEXT NOT NULL DEFAULT '#0091FF',
@@ -41,14 +45,14 @@ const migrations: readonly string[] = [
       last_synced_at TEXT,
       sync_error TEXT,
       deleted_at TEXT,
-      UNIQUE (google_account_id, google_calendar_id)
+      UNIQUE (source_id, source_calendar_id)
     );
     CREATE INDEX idx_calendars_audience_person ON calendars(audience_person_id);
 
     CREATE TABLE events (
       id TEXT PRIMARY KEY,
       calendar_id TEXT NOT NULL REFERENCES calendars(id) ON DELETE CASCADE,
-      google_event_id TEXT NOT NULL,
+      source_event_id TEXT NOT NULL,
       etag TEXT,
       ical_uid TEXT,
       title TEXT NOT NULL DEFAULT '',
@@ -65,7 +69,7 @@ const migrations: readonly string[] = [
       remote_updated_at TEXT,
       created_at TEXT NOT NULL,
       updated_at TEXT NOT NULL,
-      UNIQUE (calendar_id, google_event_id)
+      UNIQUE (calendar_id, source_event_id)
     );
     CREATE INDEX idx_events_calendar_start ON events(calendar_id, start_at);
     CREATE INDEX idx_events_recurring_event ON events(recurring_event_id);
@@ -238,50 +242,18 @@ const migrations: readonly string[] = [
     ALTER TABLE auth_sessions ADD COLUMN csrf_secret_hash BLOB;
   `,
 
-  // 003 - one-time, phone-authorized Google OAuth attempts
-  `
-    ALTER TABLE google_accounts ADD COLUMN auth_state TEXT NOT NULL DEFAULT 'connected'
-      CHECK (auth_state IN ('connected', 'reauthorization_required'));
-
-    CREATE TABLE google_oauth_attempts (
-      id TEXT PRIMARY KEY,
-      state_hash BLOB NOT NULL UNIQUE,
-      parent_session_hash BLOB NOT NULL,
-      pkce_verifier TEXT NOT NULL,
-      scopes TEXT NOT NULL,
-      expires_at TEXT NOT NULL,
-      consumed_at TEXT,
-      created_at TEXT NOT NULL
-    );
-    CREATE INDEX idx_google_oauth_attempts_expiry ON google_oauth_attempts(expires_at);
-  `,
-
-  // 004 - retain parsed recurrence dates in the read-only Google event cache
+  // 004 - retain parsed recurrence dates in the cached event store
   `
     ALTER TABLE events ADD COLUMN recurrence_exdates TEXT;
     ALTER TABLE events ADD COLUMN recurrence_rdates TEXT;
   `,
 
-  // 005 - observable Google cache synchronization health
+  // 005 - observable per-calendar synchronization health
   `
     ALTER TABLE calendars ADD COLUMN last_sync_attempt_at TEXT;
   `,
 
-  // 006 - Google OAuth client configuration entered by a parent, not Docker
-  `
-    CREATE TABLE google_configuration (
-      id INTEGER PRIMARY KEY CHECK (id = 1),
-      household_id TEXT NOT NULL,
-      redirect_uri TEXT NOT NULL,
-      vault_salt BLOB NOT NULL,
-      client_id_enc BLOB NOT NULL,
-      client_secret_enc BLOB NOT NULL,
-      token_encryption_key_enc BLOB NOT NULL,
-      configured_at TEXT NOT NULL
-    );
-  `,
-
-  // 007 - recurring weekly meal-plan defaults
+  // 006 - recurring weekly meal-plan defaults
   `
     CREATE TABLE meal_templates (
       day_of_week INTEGER NOT NULL CHECK (day_of_week BETWEEN 1 AND 7),
@@ -291,7 +263,7 @@ const migrations: readonly string[] = [
     );
   `,
 
-  // 008 - person theme and celebration contract, before managed media upload
+  // 007 - person theme and celebration contract, before managed media upload
   `
     CREATE TABLE media_assets (
       id TEXT PRIMARY KEY,
@@ -316,7 +288,7 @@ const migrations: readonly string[] = [
       CHECK (celebration_duration_ms BETWEEN 1500 AND 5000);
   `
   ,
-  // 009 - more than one celebration per person; the legacy primary column is retained for compatibility.
+  // 008 - more than one celebration per person; the legacy primary column is retained for compatibility.
   `
     ALTER TABLE people ADD COLUMN celebration_asset_ids TEXT NOT NULL DEFAULT '[]';
     UPDATE people SET celebration_asset_ids = CASE

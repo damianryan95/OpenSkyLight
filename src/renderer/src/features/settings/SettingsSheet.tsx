@@ -15,12 +15,9 @@ import {
   useRedemptions,
   useRewardMutations,
   useRewards,
-  useGoogleMutations,
-  useGoogleStatus,
   useIcsMutations,
   usePeople,
   usePeopleMutations,
-  useRemoteCalendars,
   useSettings,
   useSettingsMutation,
   useSyncNow,
@@ -244,102 +241,6 @@ function SyncStatusRow() {
   )
 }
 
-function GoogleSection() {
-  const { data: status } = useGoogleStatus()
-  const google = useGoogleMutations()
-  const [clientId, setClientId] = useState('')
-  const [clientSecret, setClientSecret] = useState('')
-  const [expandedAccount, setExpandedAccount] = useState<string | null>(null)
-  const { data: remoteCals = [], isLoading: remoteLoading } = useRemoteCalendars(expandedAccount)
-
-  if (!status) return null
-
-  const saveAndConnect = (): void => {
-    google.setCredentials.mutate(
-      { clientId, clientSecret },
-      { onSuccess: () => google.connect.mutate(undefined) }
-    )
-  }
-
-  return (
-    <div>
-      <FieldLabel>Google Calendar</FieldLabel>
-      {!status.configured ? (
-        <div className="flex flex-col gap-3 rounded-2xl bg-paper-deep/50 p-4">
-          <p className="text-base font-semibold text-ink-soft">
-            Two-way sync uses your own (free) Google Cloud project. Create a{' '}
-            <span className="font-extrabold">Desktop app</span> OAuth client in the Google Cloud console, enable the
-            Calendar API, and paste the credentials here.
-          </p>
-          <OskInput value={clientId} onChange={setClientId} placeholder="OAuth client ID" />
-          <OskInput value={clientSecret} onChange={setClientSecret} placeholder="OAuth client secret" />
-          <BigButton onClick={saveAndConnect} disabled={clientId.trim().length < 10 || clientSecret.trim().length < 5}>
-            {google.connect.isPending ? 'Waiting for browser sign-in…' : 'Save & connect Google'}
-          </BigButton>
-        </div>
-      ) : (
-        <div className="flex flex-col gap-3">
-          {status.accounts.map((account) => (
-            <div key={account.id} className="rounded-2xl bg-paper-deep/50 p-3">
-              <div className="flex items-center gap-3">
-                <span className="flex-1">
-                  <span className="block text-lg font-bold">{account.email}</span>
-                  {account.error && <span className="block text-sm font-bold text-ember-deep">{account.error}</span>}
-                </span>
-                <button
-                  type="button"
-                  onClick={() => setExpandedAccount(expandedAccount === account.id ? null : account.id)}
-                  className="pressable rounded-full border-2 border-line bg-card px-4 py-1.5 text-sm font-bold text-ink-soft"
-                >
-                  {expandedAccount === account.id ? 'Hide calendars' : 'Choose calendars'}
-                </button>
-                <button
-                  type="button"
-                  onClick={() => google.disconnect.mutate({ accountId: account.id })}
-                  className="pressable rounded-full border-2 border-ember-soft px-4 py-1.5 text-sm font-bold text-ember-deep"
-                >
-                  Disconnect
-                </button>
-              </div>
-              {expandedAccount === account.id && (
-                <div className="mt-3 flex flex-col gap-2">
-                  {remoteLoading && <p className="text-sm font-bold text-ink-faint">Loading calendars…</p>}
-                  {remoteCals.map((rc) => (
-                    <div key={rc.id} className="flex items-center gap-3 rounded-xl bg-card px-3 py-2">
-                      <span className="h-5 w-5 rounded-full" style={{ backgroundColor: rc.color }} />
-                      <span className="min-w-0 flex-1 truncate text-base font-bold">
-                        {rc.name}
-                        {rc.readOnly && <span className="ml-2 text-xs font-extrabold text-ink-faint">READ-ONLY</span>}
-                      </span>
-                      <Toggle
-                        checked={rc.selected}
-                        onChange={(selected) =>
-                          google.setCalendarSelected.mutate({
-                            accountId: account.id,
-                            googleCalendarId: rc.id,
-                            name: rc.name,
-                            color: rc.color,
-                            readOnly: rc.readOnly,
-                            selected
-                          })
-                        }
-                        label={`Sync ${rc.name}`}
-                      />
-                    </div>
-                  ))}
-                </div>
-              )}
-            </div>
-          ))}
-          <BigButton variant="ghost" onClick={() => google.connect.mutate(undefined)} disabled={google.connect.isPending}>
-            {google.connect.isPending ? 'Waiting for browser sign-in…' : 'Add Google account'}
-          </BigButton>
-        </div>
-      )}
-    </div>
-  )
-}
-
 function IcsSection() {
   const { data: calendars = [] } = useCalendars()
   const calendarMutations = useCalendarMutations()
@@ -418,7 +319,6 @@ function CalendarsTab() {
   return (
     <div className="flex flex-col gap-6">
       <SyncStatusRow />
-      <GoogleSection />
       <IcsSection />
       <div>
         <FieldLabel>Calendars on this display</FieldLabel>

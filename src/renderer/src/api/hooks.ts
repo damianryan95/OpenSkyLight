@@ -88,51 +88,12 @@ export function useSettingsMutation() {
   )
 }
 
-export function useGoogleStatus() {
-  return useQuery({ queryKey: ['googleStatus'], queryFn: () => ipcInvoke('google:getStatus', undefined) })
-}
-
-export function useRemoteCalendars(accountId: string | null) {
-  return useQuery({
-    queryKey: ['remoteCalendars', accountId],
-    queryFn: () => ipcInvoke('google:listRemoteCalendars', { accountId: accountId! }),
-    enabled: accountId !== null,
-    staleTime: 60_000
-  })
-}
-
 export function useSyncStatus() {
   return useQuery({
     queryKey: ['syncStatus'],
     queryFn: () => ipcInvoke('sync:getStatus', undefined),
     refetchInterval: 15_000
   })
-}
-
-export function useGoogleMutations() {
-  const calendarKeys = [['googleStatus'], ['remoteCalendars'], ['calendars'], ['occurrences'], ['syncStatus']]
-  return {
-    setCredentials: useInvalidatingMutation(
-      (input: { clientId: string; clientSecret: string }) => ipcInvoke('google:setCredentials', input),
-      [['googleStatus']]
-    ),
-    connect: useInvalidatingMutation(() => ipcInvoke('google:connect', undefined), calendarKeys),
-    disconnect: useInvalidatingMutation(
-      (input: { accountId: string }) => ipcInvoke('google:disconnect', input),
-      calendarKeys
-    ),
-    setCalendarSelected: useInvalidatingMutation(
-      (input: {
-        accountId: string
-        googleCalendarId: string
-        name: string
-        color: string
-        readOnly: boolean
-        selected: boolean
-      }) => ipcInvoke('google:setCalendarSelected', input),
-      calendarKeys
-    )
-  }
 }
 
 export function useIcsMutations() {

@@ -1,5 +1,5 @@
 import type Database from 'better-sqlite3'
-import { DEFAULT_SETTINGS, type AppSettings, type CalendarDto, type ChoreDto, type DayChoreDto, type OccurrenceDto, type RewardDto, type StarBalanceDto } from '../../shared/types'
+import { DEFAULT_SETTINGS, type AppSettings, type CalendarDto, type CalendarProvider, type ChoreDto, type DayChoreDto, type OccurrenceDto, type RewardDto, type StarBalanceDto } from '../../shared/types'
 import { createEventFeedService } from './eventFeeds'
 import { createChoresRewardsService, type ChoresRewardsService } from './choresRewards'
 import type { HouseholdSettingsService } from './settings'
@@ -22,10 +22,14 @@ export function createDisplayReadService(sqlite: Database.Database, chores: Chor
   }
 
   function calendars(): CalendarDto[] {
-    return sqlite.prepare(`SELECT id, name, color, selected FROM calendars WHERE deleted_at IS NULL ORDER BY name COLLATE NOCASE`).all()
+    return sqlite.prepare(`
+      SELECT c.id, c.name, c.color, c.selected, s.kind
+      FROM calendars c JOIN calendar_sources s ON s.id = c.source_id
+      WHERE c.deleted_at IS NULL ORDER BY c.name COLLATE NOCASE
+    `).all()
       .map((row) => {
-        const value = row as { id: string; name: string; color: string; selected: number }
-        return { id: value.id, name: value.name, color: value.color, provider: 'google' as const, readOnly: true, visible: value.selected === 1 }
+        const value = row as { id: string; name: string; color: string; selected: number; kind: CalendarProvider }
+        return { id: value.id, name: value.name, color: value.color, provider: value.kind, readOnly: true, visible: value.selected === 1 }
       })
   }
 

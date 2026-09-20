@@ -98,22 +98,6 @@ export const settingsPatchSchema = z.object({
 export const idSchema = z.object({ id })
 export const voidSchema = z.void().or(z.undefined()).or(z.null())
 
-export const googleCredentialsSchema = z.object({
-  clientId: z.string().trim().min(10),
-  clientSecret: z.string().trim().min(5)
-})
-
-export const accountIdSchema = z.object({ accountId: id })
-
-export const googleCalendarSelectSchema = z.object({
-  accountId: id,
-  googleCalendarId: z.string().min(1),
-  name: z.string().trim().min(1).max(120),
-  color: hexColor,
-  readOnly: z.boolean(),
-  selected: z.boolean()
-})
-
 export const icsAddSchema = z.object({
   url: z.string().trim().url().max(2000),
   name: z.string().trim().min(1).max(80),
