@@ -1,0 +1,27 @@
+<?xml version="1.0" standalone='no'?>
+<!DOCTYPE service-group SYSTEM "avahi-service.dtd">
+
+<!--
+  Install as /etc/avahi/services/openskylight.service on the Docker host.
+
+  This publishes an HTTP service record so OpenSkyLight shows up in network
+  browsers as a named service rather than only as a bare hostname. It is
+  optional: once the host's hostname is `openskylight`, avahi-daemon already
+  answers for `openskylight.local`, which is what a parent actually types.
+
+  Replace 6123 if the host publishes a different port. avahi-daemon picks the
+  file up without a restart; `sudo systemctl reload avahi-daemon` forces it.
+
+  This record is answered by the HOST, not by the container. That is
+  deliberate: a bridge-networked container cannot answer LAN multicast, and it
+  does not need to — the name resolves to the host, and Docker's published
+  port forwards from there.
+-->
+<service-group>
+  <name replace-wildcards="yes">OpenSkyLight on %h</name>
+  <service>
+    <type>_http._tcp</type>
+    <port>6123</port>
+    <txt-record>path=/admin/</txt-record>
+  </service>
+</service-group>

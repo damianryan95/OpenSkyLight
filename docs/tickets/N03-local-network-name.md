@@ -1,6 +1,6 @@
 # N03 - Local network name for the server
 
-Status: planned
+Status: in progress
 Depends on: S06, O03
 
 ## Context
@@ -31,3 +31,17 @@ Likely files: Dockerfile/compose (Avahi sidecar or host-networking note),
 
 Verify: manual resolution test from a phone and a laptop on the same LAN;
 docs review.
+
+Implementation note (2026-09-20): setup, verification steps and limitations are
+in [`docs/deployment/local-network-name.md`](../deployment/local-network-name.md),
+with an optional Avahi service record in `deployment/raspberry-pi/`.
+
+The name is answered by the host's `avahi-daemon`, not by OpenSkyLight: a
+bridge-networked container cannot answer LAN multicast, and does not need to —
+the name resolves to the host and the published port forwards from there. So
+this needs no application code and no mDNS dependency, only host configuration.
+Enrollment links already derive from `window.location.origin`, so they inherit
+the name as soon as a parent administers the board by it.
+
+**Not yet verified.** The acceptance criteria need a phone resolving the name
+against a real deployment; the remaining work is that test, not code.

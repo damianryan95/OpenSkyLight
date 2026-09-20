@@ -1,8 +1,8 @@
 # OpenSkyLight
 
 OpenSkyLight is a self-hosted household dashboard for a wall display. It
-combines a read-only Google Calendar view with chores, star balances, rewards,
-lists, meals, weather, and per-person views.
+combines a read-only view of your own calendar with chores, star balances,
+rewards, lists, meals, weather, and per-person views.
 
 One server runs in your home. Any modern browser can be a kiosk; parents use a
 phone-friendly administration site. There is no Electron application and no
@@ -30,10 +30,13 @@ Would be great right about here
 
 - A Docker host that stays on (a small Linux server, VM, or NAS is ideal).
 - Docker Engine with Docker Compose v2.
-- A fixed LAN address or local DNS name for that host.
+- A fixed LAN address for that host, or a local name — see
+  [local network name](docs/deployment/local-network-name.md).
 - A phone/browser for parent setup and one or more Chromium/Chrome browsers
   for displays.
-- Optional: a Google Cloud project if you want Google Calendar sync.
+- Optional: a calendar you already use. Any CalDAV account (iCloud, Fastmail,
+  Nextcloud, Google) or an ICS feed URL works. No cloud project, API key, or
+  developer account is needed.
 
 The server is the only supported SQLite owner. Keep its Docker volume on local
 disk—never SMB/NFS—and run only one OpenSkyLight server against that volume.
@@ -44,15 +47,15 @@ disk—never SMB/NFS—and run only one OpenSkyLight server against that volume.
 Parent phone ── /admin/ ──┐
                            ├── OpenSkyLight server + SQLite volume
 Wall displays ──── / ─────┘              │
-                                          └── read-only Google Calendar sync
+                                          └── read-only CalDAV / ICS sync
 ```
 
 - The kiosk at `/` starts in Family view. It can only complete or undo chores
   for the current household day.
 - Parent administration at `/admin/` uses a household PIN and controls people,
   calendars, chores, rewards, lists, meals, and displays.
-- Google Calendar remains the event editor and source of truth. OpenSkyLight
-  only reads/caches Google events; it never edits them.
+- Your own calendar remains the event editor and source of truth. OpenSkyLight
+  reads and caches it; it never writes back.
 - Each display has its own private credential. A parent creates a one-time
   enrollment link; the browser stores the credential locally and removes the
   secret fragment from its address bar.
@@ -63,7 +66,7 @@ Run these commands on the Docker host or in a checked-out copy of this
 repository. Examples use Fish.
 
 ```fish
-git clone https://github.com/lowerygt/OpenSkyLight.git
+git clone https://github.com/damianryan95/OpenSkyLight.git
 cd OpenSkyLight
 cp compose.example.yaml compose.yaml
 
@@ -86,6 +89,21 @@ When the health check returns `{"status":"ready"}`, open:
 The Compose defaults bind only to `127.0.0.1`; setting
 `OSL_LISTEN_ADDRESS` is what makes the service reachable on the LAN. Prefer a
 specific address rather than `0.0.0.0`.
+
+### Use a name instead of an address
+
+Nobody should have to remember `192.168.1.25`. Name the host `openskylight`
+and most systems advertise it automatically, so the board answers to
+`http://openskylight.local:3000/admin/` instead:
+
+```fish
+sudo hostnamectl set-hostname openskylight
+sudo systemctl restart avahi-daemon
+```
+
+The numeric address keeps working as a fallback, which matters because a few
+Android builds still do not resolve `.local`. Full setup, verification, and
+limitations are in [local network name](docs/deployment/local-network-name.md).
 
 ### First parent setup
 
@@ -122,25 +140,37 @@ adjustment from **Chores → Adjust star balance**.
 Use the parent site for all administration. The display cannot create events,
 edit lists, change rewards, or alter past/future chore records.
 
-## Google Calendar setup (optional)
+## Calendar setup (optional)
 
-Google integration needs a stable HTTPS hostname that works from the parent
-phone and resolves to the server over the LAN/VPN—for example,
-`https://calendar.example.net`. A local reverse proxy and split-horizon DNS
-are common. Do not use a public port-forward merely for OpenSkyLight.
+Connect the calendar you already use. There is no cloud project to create, no
+API key, no client secret, and no domain or HTTPS requirement — a plain LAN
+address or `.local` name is enough.
 
-1. In Google Cloud, enable the Google Calendar API.
-2. Configure a **Web application** OAuth client and the consent screen.
-3. Add your domain as an authorized domain.
-4. Register the exact callback displayed in the parent portal:
-   `https://your-host/api/v1/google/callback`.
-5. In `/admin/` → **Calendar**, enter the client ID/secret, complete the
-   Google consent flow, then select the calendars to show.
-6. Map each selected calendar to Family or a household member.
+### A calendar account (CalDAV)
 
-Events remain editable only in Google Calendar. Cached events remain visible
-if Google is temporarily unavailable. Full OAuth requirements and security
-details are in [the Google OAuth decision](docs/adr/0001-headless-google-oauth.md).
+In `/admin/` → **Calendar** → **Connect a calendar account**, enter a server
+address, your username, and an **app-specific password**. Most providers
+require an app password rather than your normal one.
+
+| Provider | Server address |
+| --- | --- |
+| iCloud | `https://caldav.icloud.com` |
+| Fastmail | `https://caldav.fastmail.com` |
+| Nextcloud | `https://your-host/remote.php/dav` |
+| Google | `https://apidata.googleusercontent.com/caldav/v2` |
+
+Then choose which calendars to show and map each to Family or one household
+member.
+
+### A subscribed feed (ICS)
+
+For a school or fixtures calendar, use **Subscribe to a feed** and paste the
+`.ics` address. Feeds are read-only by nature.
+
+Events stay editable only in the calendar they came from; OpenSkyLight reads
+and caches them and never writes back. A cached copy stays on the board if a
+provider is briefly unreachable. The reasoning is in
+[ADR 0002](docs/adr/0002-provider-agnostic-calendar-access.md).
 
 ## Raspberry Pi / browser kiosk
 
@@ -198,8 +228,8 @@ test -s "backups/openskylight-$stamp.db"; and echo backup-ok
 ```
 
 Keep backups outside the Docker volume and protect them as household data. The
-application data volume also contains the key needed to decrypt Google
-configuration/tokens, so retain that volume securely too. Test restores only
+application data volume also contains the key needed to decrypt stored
+calendar credentials, so retain that volume securely too. Test restores only
 into a new empty volume; the detailed restore procedure is in
 [operations](docs/deployment/operations.md).
 
@@ -210,7 +240,7 @@ into a new empty volume; the detailed restore procedure is in
 | Phone/display cannot connect | Confirm the LAN address, port `3000`, Docker health, and that `OSL_LISTEN_ADDRESS` is set to the host’s LAN address. |
 | Kiosk says a chore is for the wrong date | In `/admin/` → **Home**, verify the household IANA timezone. Reload the kiosk after changing it. |
 | Display is unregistered | Register it again in **Displays** and open the new one-time enrollment link on that device. |
-| Google events are missing | Check **Displays → Diagnostics**, then verify the Google account and calendar selection in **Calendar**. Cached events remain available during a temporary outage. |
+| Calendar events are missing | Check **Displays → Diagnostics**, then verify the account and calendar selection in **Calendar**. Cached events remain available during a temporary outage. |
 | Manual stars do not appear immediately | The parent page shows the resulting balance; connected displays revalidate automatically. Check that the adjustment confirmation appeared. |
 | Need logs | `docker compose logs -f --tail=200 openskylight` |
 
