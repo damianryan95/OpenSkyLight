@@ -1,12 +1,14 @@
 import type { IncomingMessage, ServerResponse } from 'node:http'
 import { z } from 'zod'
 import { DateTime } from 'luxon'
-import { addListItemRequestSchema, apiContract, apiInfoResponseSchema, choreCorrectionRequestSchema, createChoreRequestSchema, createListRequestSchema, createPersonRequestSchema, createRewardRequestSchema, displayChoreCommandRequestSchema, mealRangeRequestSchema, mealSlotKindSchema, redeemRewardRequestSchema, registerDisplayRequestSchema, setMealRequestSchema, setMealTemplateRequestSchema, starAdjustmentRequestSchema, updateChoreRequestSchema, updateDisplayRequestSchema, updateHouseholdSettingsRequestSchema, updateListRequestSchema, updatePersonRequestSchema, updateRewardRequestSchema } from '../../shared/api/contract'
+import { addListItemRequestSchema, apiContract, apiInfoResponseSchema, choreCorrectionRequestSchema, connectCalDavRequestSchema, connectIcsRequestSchema, setCalendarSelectionRequestSchema, createChoreRequestSchema, createListRequestSchema, createPersonRequestSchema, createRewardRequestSchema, displayChoreCommandRequestSchema, mealRangeRequestSchema, mealSlotKindSchema, redeemRewardRequestSchema, registerDisplayRequestSchema, setMealRequestSchema, setMealTemplateRequestSchema, starAdjustmentRequestSchema, updateChoreRequestSchema, updateDisplayRequestSchema, updateHouseholdSettingsRequestSchema, updateListRequestSchema, updatePersonRequestSchema, updateRewardRequestSchema } from '../../shared/api/contract'
 import { AuthError, CSRF_HEADER, DisplayDeviceService, HouseholdAuthService, PARENT_SESSION_COOKIE } from '../auth'
 import { type ChoresRewardsService, type DisplayReadService, type HouseholdSettingsService, type ListsDomain, type MealsDomain, type PeopleService, type MediaService } from '../domain'
 import { createReadStream } from 'node:fs'
 import type { EventStream, EventStreamAuthenticator } from '../events'
 import type { CalendarSyncStatusService } from '../sync/status'
+import type { CalendarSourceService } from '../sync/sources'
+import type { SyncScheduler } from '../sync/scheduler'
 import type { OnlineIconSearchService } from '../icons'
 import { ApiRequestError, readBinaryBody, readJsonBody, sendApiError, sendJson, validateApiInput } from './http'
 
@@ -19,6 +21,8 @@ export interface ApiRouterDependencies {
   settings?: HouseholdSettingsService
   people?: PeopleService
   syncStatus?: CalendarSyncStatusService
+  calendarSources?: CalendarSourceService
+  syncScheduler?: SyncScheduler
   displayRead?: DisplayReadService
   lists?: ListsDomain
   meals?: MealsDomain
@@ -30,6 +34,15 @@ export interface ApiRouterDependencies {
 
 const pinRequestSchema = z.object({ pin: z.string() }).strict()
 const changePinRequestSchema = z.object({ newPin: z.string() }).strict()
+const connectCalendarSourceRequestSchema = z.discriminatedUnion('kind', [
+  connectCalDavRequestSchema.extend({ kind: z.literal('caldav') }),
+  connectIcsRequestSchema.extend({ kind: z.literal('ics') })
+])
+
+function requireSources(dependencies: ApiRouterDependencies): CalendarSourceService {
+  if (dependencies.calendarSources === undefined) throw new ApiRequestError(503, 'service_unavailable', 'Calendar sources are unavailable')
+  return dependencies.calendarSources
+}
 
 export async function handleApiRequest(request: IncomingMessage, response: ServerResponse, dependencies: ApiRouterDependencies = {}): Promise<boolean> {
   const method = request.method ?? 'GET'
@@ -333,6 +346,66 @@ export async function handleApiRequest(request: IncomingMessage, response: Serve
       dependencies.meals.parentCommands.set(date, slot, text)
       publishInvalidation(dependencies, ['meals'])
       response.writeHead(204); response.end(); return true
+    }
+
+    if (path === '/api/v1/calendar-sources') {
+      const sources = requireSources(dependencies)
+      if (method === 'GET') { requireParentRead(auth, request); sendJson(response, 200, { sources: sources.list() }); return true }
+      if (method === 'POST') {
+        requireParentMutation(auth, request)
+        const input = await readJsonBody(request, connectCalendarSourceRequestSchema)
+        const source = input.kind === 'ics'
+          ? await sources.connectIcs({ name: input.name, url: input.url })
+          : await sources.connectCalDav({ name: input.name, baseUrl: input.baseUrl, username: input.username, password: input.password })
+        if (input.kind === 'ics') void dependencies.syncScheduler?.syncNow()
+        sendJson(response, 201, source)
+        return true
+      }
+      throw new ApiRequestError(405, 'method_not_allowed', `Method ${method} is not allowed`)
+    }
+
+    if (path === '/api/v1/calendar-sources/sync') {
+      if (method !== 'POST') throw new ApiRequestError(405, 'method_not_allowed', `Method ${method} is not allowed`)
+      requireParentMutation(auth, request)
+      requireSources(dependencies)
+      void dependencies.syncScheduler?.syncNow()
+      response.writeHead(202); response.end(); return true
+    }
+
+    const sourceMatch = /^\/api\/v1\/calendar-sources\/([^/]+)(?:\/(calendars))?$/.exec(path)
+    if (sourceMatch !== null) {
+      const sources = requireSources(dependencies)
+      const sourceId = decodeURIComponent(sourceMatch[1])
+      const calendars = sourceMatch[2] === 'calendars'
+      if (calendars && method === 'GET') {
+        requireParentRead(auth, request)
+        const discovered = await sources.discoverCollections(sourceId)
+        sendJson(response, 200, {
+          calendars: discovered.map((collection) => ({
+            id: collection.url, name: collection.name, color: collection.color, primary: false,
+            readOnly: collection.readOnly, selected: collection.selected, audiencePersonId: collection.audiencePersonId
+          }))
+        })
+        return true
+      }
+      if (calendars && method === 'PUT') {
+        requireParentMutation(auth, request)
+        const input = await readJsonBody(request, setCalendarSelectionRequestSchema)
+        sources.setCalendarSelection({
+          sourceId, url: input.calendar.id, name: input.calendar.name, color: input.calendar.color,
+          selected: input.selected, audiencePersonId: input.audiencePersonId
+        })
+        if (input.selected) void dependencies.syncScheduler?.syncNow()
+        publishInvalidation(dependencies, ['events'])
+        response.writeHead(204); response.end(); return true
+      }
+      if (!calendars && method === 'DELETE') {
+        requireParentMutation(auth, request)
+        sources.remove(sourceId)
+        publishInvalidation(dependencies, ['events'])
+        response.writeHead(204); response.end(); return true
+      }
+      throw new ApiRequestError(405, 'method_not_allowed', `Method ${method} is not allowed`)
     }
 
     if (path === '/api/v1/displays') {

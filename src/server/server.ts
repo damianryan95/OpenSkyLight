@@ -9,6 +9,8 @@ import type { ServerDatabase } from './db'
 import { createChoresRewardsService, createDisplayReadService, createHouseholdSettingsService, createListsDomain, createMealsDomain, createPeopleService, createMediaService } from './domain'
 import { EventStream, type EventStreamAuthenticator } from './events'
 import { createCalendarSyncStatusService } from './sync/status'
+import { createCalendarSourceService } from './sync/sources'
+import { createSyncScheduler } from './sync/scheduler'
 import { safeLogErrorMessage } from './logging'
 import { createOnlineIconSearchService } from './icons'
 
@@ -54,6 +56,12 @@ export function createHeadlessServer(options: HeadlessServerOptions = {}): Headl
   const syncStatus = options.database === undefined ? undefined : createCalendarSyncStatusService(options.database.sqlite, {
     publish: (data) => eventStream.publish({ type: 'sync.status', data })
   })
+  const calendarSources = options.database === undefined || settings === undefined ? undefined : createCalendarSourceService(
+    options.database.sqlite,
+    () => settings.get().timezone,
+    { status: syncStatus, onEventsChanged: () => eventStream.publish({ type: 'query.invalidated', data: { resources: ['events'] } }) }
+  )
+  const syncScheduler = calendarSources === undefined ? undefined : createSyncScheduler(calendarSources)
   const chores = options.database === undefined ? undefined : createChoresRewardsService(options.database.sqlite, undefined, (event) => {
     eventStream.publish({
       type: 'chore.changed',
@@ -85,7 +93,7 @@ export function createHeadlessServer(options: HeadlessServerOptions = {}): Headl
         return device === undefined ? undefined : { type: 'display' as const, id: device.id }
       }
     }),
-    ...(auth === undefined || displays === undefined || settings === undefined || chores === undefined || people === undefined || syncStatus === undefined || displayRead === undefined || lists === undefined || meals === undefined ? {} : { auth, displays, settings, chores, people, media, syncStatus, displayRead, lists, meals, icons: createOnlineIconSearchService() })
+    ...(auth === undefined || displays === undefined || settings === undefined || chores === undefined || people === undefined || syncStatus === undefined || displayRead === undefined || lists === undefined || meals === undefined ? {} : { auth, displays, settings, chores, people, media, syncStatus, calendarSources, syncScheduler, displayRead, lists, meals, icons: createOnlineIconSearchService() })
   }, options.staticDir, options.companionStaticDir)
   let started: StartedHeadlessServer | undefined
 
@@ -102,10 +110,12 @@ export function createHeadlessServer(options: HeadlessServerOptions = {}): Headl
 
       const publicHost = address.address.includes(':') ? `[${address.address}]` : address.address
       started = { host: address.address, port: address.port, url: `http://${publicHost}:${address.port}` }
+      syncScheduler?.start()
       return started
     },
     async stop(): Promise<void> {
       if (!httpServer.listening) return
+      syncScheduler?.stop()
       httpServer.close()
       await once(httpServer, 'close')
       options.database?.close()

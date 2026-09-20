@@ -295,6 +295,13 @@ const migrations: readonly string[] = [
       WHEN celebration_asset_id IS NULL THEN '[]'
       ELSE json_array(celebration_asset_id)
     END;
+  `,
+
+  // 009 - CalDAV and ICS source connection details
+  `
+    ALTER TABLE calendar_sources ADD COLUMN base_url TEXT;
+    ALTER TABLE calendar_sources ADD COLUMN username TEXT;
+    ALTER TABLE calendar_sources ADD COLUMN password_enc BLOB;
   `
 ]
 

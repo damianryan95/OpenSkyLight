@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<multistatus xmlns="DAV:" xmlns:C="urn:ietf:params:xml:ns:caldav">
+ <response>
+  <href>/12345678/calendars/home/abc.ics</href>
+  <propstat>
+   <prop>
+    <getetag>"etag-abc"</getetag>
+    <C:calendar-data>BEGIN:VCALENDAR
+VERSION:2.0
+PRODID:-//Apple Inc.//iOS 18.0//EN
+BEGIN:VEVENT
+UID:abc
+DTSTAMP:20260601T000000Z
+DTSTART;TZID=Europe/London:20260615T190000
+DTEND;TZID=Europe/London:20260615T200000
+SUMMARY:Dinner with Ava
+END:VEVENT
+END:VCALENDAR
+</C:calendar-data>
+   </prop>
+   <status>HTTP/1.1 200 OK</status>
+  </propstat>
+ </response>
+</multistatus>

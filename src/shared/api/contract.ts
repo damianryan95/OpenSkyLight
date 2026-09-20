@@ -93,6 +93,16 @@ export const setCalendarSelectionRequestSchema = z.object({
   selected: z.boolean(),
   audiencePersonId: z.string().min(1).nullable()
 }).strict()
+export const connectCalDavRequestSchema = z.object({
+  name: z.string().min(1).max(120),
+  baseUrl: z.string().url().max(2000),
+  username: z.string().min(1).max(320),
+  password: z.string().min(1).max(1000)
+}).strict()
+export const connectIcsRequestSchema = z.object({
+  name: z.string().min(1).max(120),
+  url: z.string().url().max(2000)
+}).strict()
 export const householdSettingsSchema = z.object({ timezone: z.string().min(1), weather: z.object({ lat: z.number().min(-90).max(90), lon: z.number().min(-180).max(180), label: z.string().min(1).max(120) }).nullable() })
 export const updateHouseholdSettingsRequestSchema = householdSettingsSchema.pick({ timezone: true, weather: true }).partial()
   .refine((value) => Object.keys(value).length > 0, { message: 'At least one household setting is required' })

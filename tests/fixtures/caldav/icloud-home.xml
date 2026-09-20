@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<multistatus xmlns="DAV:" xmlns:C="urn:ietf:params:xml:ns:caldav">
+ <response>
+  <href>/12345678/principal/</href>
+  <propstat>
+   <prop><C:calendar-home-set><href>https://p01-caldav.icloud.com/12345678/calendars/</href></C:calendar-home-set></prop>
+   <status>HTTP/1.1 200 OK</status>
+  </propstat>
+ </response>
+</multistatus>

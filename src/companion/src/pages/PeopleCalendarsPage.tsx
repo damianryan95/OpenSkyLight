@@ -1,5 +1,5 @@
 import { FormEvent, useEffect, useState } from 'react'
-import type { CalendarSourceDto, PersonDto } from '@shared/api/contract'
+import type { CalendarSourceDto, DiscoveredCalendarDto, PersonDto } from '@shared/api/contract'
 import { ApiError, parentGet, parentMutation, parentUpload } from '../api/client'
 import { Card, EmptyNote, GhostButton, PersonAvatar, PrimaryButton, TextInput } from '../components/ui'
 import { AvatarCropDialog } from '../components/AvatarCropDialog'
@@ -10,19 +10,24 @@ const COLORS = ['#DC6B49', '#3D8B7A', '#527BC4', '#A66AB0', '#C68A2C', '#57736B'
 export function PeopleCalendarsPage({ section }: { section: 'household' | 'calendar' }) {
   const [people, setPeople] = useState<PersonDto[]>([])
   const [peopleError, setPeopleError] = useState<string | null>(null)
-  const [sources] = useState<CalendarSourceDto[]>([])
+  const [sources, setSources] = useState<CalendarSourceDto[]>([])
+  const [calendarError, setCalendarError] = useState<string | null>(null)
 
   const loadPeople = async () => {
     try { setPeople((await parentGet<{ people: PersonDto[] }>('/api/v1/people')).people); setPeopleError(null) }
     catch (reason) { setPeopleError(message(reason)) }
   }
+  const loadSources = async () => {
+    try { setSources((await parentGet<{ sources: CalendarSourceDto[] }>('/api/v1/calendar-sources')).sources); setCalendarError(null) }
+    catch (reason) { setCalendarError(message(reason)) }
+  }
 
-  useEffect(() => { void loadPeople() }, [])
+  useEffect(() => { void loadPeople(); void loadSources() }, [])
 
   if (section === 'household') {
     return <PeoplePanel people={people} error={peopleError} onChanged={loadPeople} />
   }
-  return <CalendarPanel sources={sources} />
+  return <CalendarPanel people={people} sources={sources} error={calendarError} setError={setCalendarError} onChanged={loadSources} />
 }
 
 function PeoplePanel({ people, error, onChanged }: { people: PersonDto[]; error: string | null; onChanged: () => Promise<void> }) {
@@ -117,19 +122,124 @@ function PersonForm({ initial, submitLabel, onSubmit, onCancel }: { initial?: Pe
   </form></Card>
 }
 
-function CalendarPanel({ sources }: { sources: CalendarSourceDto[] }) {
+function CalendarPanel({ people, sources, error, setError, onChanged }: { people: PersonDto[]; sources: CalendarSourceDto[]; error: string | null; setError: (value: string | null) => void; onChanged: () => Promise<void> }) {
+  const [adding, setAdding] = useState<'caldav' | 'ics' | null>(null)
+  const [expanded, setExpanded] = useState<string | null>(null)
+  const [calendars, setCalendars] = useState<DiscoveredCalendarDto[]>([])
+  const [busy, setBusy] = useState(false)
+
+  const openCalendars = async (id: string) => {
+    setExpanded(id); setCalendars([])
+    try { setCalendars((await parentGet<{ calendars: DiscoveredCalendarDto[] }>(`/api/v1/calendar-sources/${encodeURIComponent(id)}/calendars`)).calendars); setError(null) }
+    catch (reason) { setError(message(reason)) }
+  }
+  const disconnect = async (id: string) => {
+    setBusy(true)
+    try { await parentMutation(`/api/v1/calendar-sources/${encodeURIComponent(id)}`, 'DELETE'); setExpanded(null); setCalendars([]); await onChanged() }
+    catch (reason) { setError(message(reason)) } finally { setBusy(false) }
+  }
+  const saveCalendar = async (sourceId: string, calendar: DiscoveredCalendarDto) => {
+    await parentMutation(`/api/v1/calendar-sources/${encodeURIComponent(sourceId)}/calendars`, 'PUT', {
+      calendar: { id: calendar.id, name: calendar.name, color: calendar.color, primary: calendar.primary, readOnly: calendar.readOnly },
+      selected: calendar.selected, audiencePersonId: calendar.audiencePersonId
+    })
+    await openCalendars(sourceId)
+  }
+
   return <div className="mt-4 space-y-4">
     <Card>
       <h3 className="font-display text-xl font-semibold">Calendars</h3>
-      <p className="mt-2 text-sm leading-5 text-ink-soft">Connect the calendar you already use. OpenSkyLight reads it directly — there is no account to create, no API key, and nothing to configure in a cloud console.</p>
+      <p className="mt-2 text-sm leading-5 text-ink-soft">Connect the calendar you already use. OpenSkyLight reads it directly — there is no account to create, no API key, and nothing to set up in a cloud console.</p>
     </Card>
-    {sources.length === 0 && <EmptyNote>No calendar is connected yet. Calendar connections are being rebuilt to work with any provider; this section returns with CalDAV and ICS support.</EmptyNote>}
-    {sources.map((source) => <Card key={source.id}>
-      <p className="font-bold">{source.name}</p>
-      <p className="text-sm font-semibold text-ink-faint">{source.kind === 'caldav' ? 'CalDAV' : source.kind === 'ics' ? 'Subscribed feed' : 'Phone'}</p>
-      {source.error && <p className="mt-1 text-sm font-bold text-red-800">{source.error}</p>}
+    {error && <ErrorNote>{error}</ErrorNote>}
+    {sources.length === 0 && adding === null && <EmptyNote>No calendar is connected yet.</EmptyNote>}
+
+    {sources.map((source) => <Card key={source.id} className="space-y-3">
+      <div className="flex items-center justify-between gap-2">
+        <div className="min-w-0">
+          <p className="truncate font-bold">{source.name}</p>
+          <p className="text-sm font-semibold text-ink-faint">{source.kind === 'caldav' ? 'CalDAV account' : source.kind === 'ics' ? 'Subscribed feed (read-only)' : 'Phone'}</p>
+        </div>
+        <button className="pressable min-h-11 px-2 font-extrabold text-ember" type="button" onClick={() => void disconnect(source.id)} disabled={busy}>Remove</button>
+      </div>
+      {source.error && <p className="text-sm font-bold text-red-800">{source.error}</p>}
+      {source.kind === 'caldav' && <GhostButton onClick={() => void openCalendars(source.id)}>{expanded === source.id ? 'Refresh calendars' : 'Choose calendars'}</GhostButton>}
+      {expanded === source.id && <div className="space-y-3">
+        {calendars.length === 0 && <EmptyNote>No event calendars were found in this account.</EmptyNote>}
+        {calendars.map((calendar) => <CalendarRow key={calendar.id} calendar={calendar} people={people} onSave={(next) => saveCalendar(source.id, next)} />)}
+      </div>}
     </Card>)}
+
+    {adding === null && <div className="flex flex-wrap gap-2">
+      <PrimaryButton onClick={() => { setError(null); setAdding('caldav') }}>Connect a calendar account</PrimaryButton>
+      <GhostButton onClick={() => { setError(null); setAdding('ics') }}>Subscribe to a feed</GhostButton>
+    </div>}
+    {adding === 'caldav' && <CalDavForm onCancel={() => setAdding(null)} onDone={async () => { setAdding(null); await onChanged() }} />}
+    {adding === 'ics' && <IcsForm onCancel={() => setAdding(null)} onDone={async () => { setAdding(null); await onChanged() }} />}
   </div>
+}
+
+function CalDavForm({ onDone, onCancel }: { onDone: () => Promise<void>; onCancel: () => void }) {
+  const [name, setName] = useState(''); const [baseUrl, setBaseUrl] = useState(''); const [username, setUsername] = useState('')
+  const [password, setPassword] = useState(''); const [busy, setBusy] = useState(false); const [error, setError] = useState<string | null>(null)
+  const submit = async (event: FormEvent) => {
+    event.preventDefault(); setBusy(true); setError(null)
+    try { await parentMutation('/api/v1/calendar-sources', 'POST', { kind: 'caldav', name, baseUrl, username, password }); await onDone() }
+    catch (reason) { setError(message(reason)) } finally { setBusy(false) }
+  }
+  return <Card><form className="space-y-3" onSubmit={submit}>
+    <h3 className="font-display text-xl font-semibold">Connect a calendar account</h3>
+    <p className="text-sm leading-5 text-ink-soft">Works with iCloud, Fastmail, Nextcloud, Google, and anything else that speaks CalDAV. Most accounts need an <strong>app-specific password</strong> rather than your normal one.</p>
+    <label className="block"><span className="mb-1 block text-sm font-extrabold">Name</span><TextInput value={name} onChange={setName} /></label>
+    <label className="block"><span className="mb-1 block text-sm font-extrabold">Server address</span><TextInput value={baseUrl} onChange={setBaseUrl} /></label>
+    <label className="block"><span className="mb-1 block text-sm font-extrabold">Username</span><TextInput value={username} onChange={setUsername} /></label>
+    <label className="block"><span className="mb-1 block text-sm font-extrabold">App password</span><TextInput type="password" value={password} onChange={setPassword} /></label>
+    {error && <ErrorNote>{error}</ErrorNote>}
+    <div className="flex gap-2">
+      <PrimaryButton type="submit" disabled={busy || !name.trim() || !baseUrl.trim() || !username.trim() || !password}>{busy ? 'Checking…' : 'Connect'}</PrimaryButton>
+      <GhostButton onClick={onCancel}>Cancel</GhostButton>
+    </div>
+  </form></Card>
+}
+
+function IcsForm({ onDone, onCancel }: { onDone: () => Promise<void>; onCancel: () => void }) {
+  const [name, setName] = useState(''); const [url, setUrl] = useState(''); const [busy, setBusy] = useState(false); const [error, setError] = useState<string | null>(null)
+  const submit = async (event: FormEvent) => {
+    event.preventDefault(); setBusy(true); setError(null)
+    try { await parentMutation('/api/v1/calendar-sources', 'POST', { kind: 'ics', name, url }); await onDone() }
+    catch (reason) { setError(message(reason)) } finally { setBusy(false) }
+  }
+  return <Card><form className="space-y-3" onSubmit={submit}>
+    <h3 className="font-display text-xl font-semibold">Subscribe to a feed</h3>
+    <p className="text-sm leading-5 text-ink-soft">Paste a public or secret iCalendar (.ics) address, such as a school or sports fixture list. Feeds are read-only.</p>
+    <label className="block"><span className="mb-1 block text-sm font-extrabold">Name</span><TextInput value={name} onChange={setName} /></label>
+    <label className="block"><span className="mb-1 block text-sm font-extrabold">Feed address</span><TextInput value={url} onChange={setUrl} /></label>
+    {error && <ErrorNote>{error}</ErrorNote>}
+    <div className="flex gap-2">
+      <PrimaryButton type="submit" disabled={busy || !name.trim() || !url.trim()}>{busy ? 'Checking…' : 'Subscribe'}</PrimaryButton>
+      <GhostButton onClick={onCancel}>Cancel</GhostButton>
+    </div>
+  </form></Card>
+}
+
+function CalendarRow({ calendar, people, onSave }: { calendar: DiscoveredCalendarDto; people: PersonDto[]; onSave: (calendar: DiscoveredCalendarDto) => Promise<void> }) {
+  const [draft, setDraft] = useState(calendar)
+  useEffect(() => setDraft(calendar), [calendar])
+  const [busy, setBusy] = useState(false)
+  const changed = draft.selected !== calendar.selected || draft.audiencePersonId !== calendar.audiencePersonId
+  return <Card><div className="flex gap-3">
+    <input aria-label={`Include ${calendar.name}`} className="mt-1 h-6 w-6 accent-ember" type="checkbox" checked={draft.selected} onChange={(event) => setDraft({ ...draft, selected: event.target.checked })} />
+    <div className="min-w-0 flex-1">
+      <p className="font-bold">{calendar.name}</p>
+      <p className="text-sm font-semibold text-ink-faint">{calendar.readOnly ? 'Read-only calendar' : 'Calendar'}</p>
+      {draft.selected && <label className="mt-3 block"><span className="mb-1 block text-sm font-extrabold">Show events as</span>
+        <select aria-label={`Audience for ${calendar.name}`} value={draft.audiencePersonId ?? ''} onChange={(event) => setDraft({ ...draft, audiencePersonId: event.target.value || null })} className="min-h-11 w-full rounded-xl border border-line bg-paper px-3 font-semibold">
+          <option value="">Family — no default person</option>
+          {people.map((person) => <option key={person.id} value={person.id}>{person.name}</option>)}
+        </select></label>}
+      {changed && <PrimaryButton onClick={async () => { setBusy(true); try { await onSave(draft) } finally { setBusy(false) } }} disabled={busy}>{busy ? 'Saving…' : 'Save calendar'}</PrimaryButton>}
+    </div>
+  </div></Card>
 }
 
 function ErrorNote({ children }: { children: string }) { return <p className="rounded-xl bg-red-100 p-3 text-sm font-bold text-red-800" role="alert">{children}</p> }
