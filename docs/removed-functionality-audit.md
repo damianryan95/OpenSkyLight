@@ -19,7 +19,7 @@ from there. Most of what is missing went during that re-platforming.
 | **Bird detections (BirdNET-Go)** | `C02` | Tile pointed at a BirdNET-Go instance. No trace remains. |
 | **Two-way Google Calendar sync** | `C03` | Kiosk could create/edit/delete events. Deliberately reduced to read-only. |
 | **Google Calendar integration entirely** | `N13` | Replaced by provider-agnostic CalDAV/ICS (`N14`) per ADR 0002 — a deliberate widening, not a loss. |
-| **Local calendars with on-screen event create/edit/delete** | `C03`, `K03` | The kiosk is now strictly read-only apart from ticking today's chores. |
+| **Local calendars with on-screen event create/edit/delete** | `C03`, `K03` | The kiosk is now strictly read-only apart from ticking today's chores. **Selected to return** as [`N15`](tickets/N15-on-screen-calendar-editing.md), once `N06` provides a write path. |
 
 ## 2. Lost when Electron was retired (`C04`)
 

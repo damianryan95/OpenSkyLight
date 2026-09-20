@@ -1,6 +1,6 @@
 # N14 - CalDAV and ICS calendar source
 
-Status: planned
+Status: done
 Depends on: N13
 
 ## Context

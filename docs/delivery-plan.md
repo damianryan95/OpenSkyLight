@@ -94,14 +94,20 @@ results, and the wizard path is proven end-to-end on a factory image.
 
 ## Milestone 3 — Anywhere access and two-way sync
 
-**Tickets:** `N07`, then `N06`
-**Blocked by:** `N03`, `N04` (N07); `N05`, `N14` (N06)
+**Tickets:** `N07`, then `N06`, then `N15`
+**Blocked by:** `N03`, `N04` (N07); `N05`, `N14` (N06); `N06` (N15)
 **Goal:** manage the board from anywhere over a self-hosted tunnel, and write
 events back to the underlying calendar.
 
 `N07` requires a security review before merge per ADR 0003 — budget for it
 rather than treating it as a formality. `N06` should produce a short design
 note on conflict resolution before implementation starts.
+
+`N15` restores on-screen event editing, which upstream had and the headless
+re-platforming removed. It is last in this milestone because it needs `N06`'s
+write path, and because it is the second ticket to narrow `K03` — the
+read-only display guarantee — so it should land while that decision is fresh
+rather than months later.
 
 **Exit criteria:** an external port scan finds no HTTP surface, PIN lockout is
 demonstrable, and a round-trip event edit reaches the parent's own calendar app.

@@ -154,6 +154,7 @@ Product and technical direction: [`phone-first-roadmap.md`](../phone-first-roadm
 - [N10 - SD card photo storage (deferred)](N10-sd-card-photo-storage.md)
 - [N11 - Device access hardening (deferred)](N11-device-access-hardening.md)
 - [N12 - Power management (deferred)](N12-power-management.md)
+- [N15 - On-screen calendar editing](N15-on-screen-calendar-editing.md)
 
 N01 and N13 are ready. The calendar direction is set by
 [ADR 0002](../adr/0002-provider-agnostic-calendar-access.md), which supersedes

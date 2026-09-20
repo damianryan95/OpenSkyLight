@@ -95,6 +95,7 @@ barrier for the target user, and it gates the product's core feature.
 4. **Phase 3 — Anywhere access and two-way sync**
    - `N07` Self-hosted remote access via WireGuard
    - `N06` Bidirectional calendar sync
+   - `N15` On-screen calendar editing, once `N06` provides the write path
 
 5. **Phase 4 — Backup and resilience**
    - `N08` Local USB backup target
@@ -116,7 +117,7 @@ Running in parallel throughout, unaffected by this roadmap:
 N01 (standalone)
 
 N13 --> N14 --+
-        |     +--> N06
+        |     +--> N06 --> N15
 N13 --> N05 --+
 
 O02 --> N02 --> N04 <-- N03
@@ -139,6 +140,7 @@ O02 --> N12
 | N14 | CalDAV and ICS calendar source | planned | N13 |
 | N05 | Phone-native calendar connector | planned | N13 |
 | N06 | Bidirectional calendar sync | planned | N05, N14 |
+| N15 | On-screen calendar editing | planned | N06 |
 | N02 | Pi first-boot Wi-Fi AP pairing | planned | O02 |
 | N03 | Local network name for the server | planned | S06, O03 |
 | N04 | Phone-first setup wizard | planned | N02, N03, P01 |

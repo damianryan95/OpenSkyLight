@@ -1,6 +1,6 @@
 # N13 - Retire the Google OAuth layer and de-Google the event schema
 
-Status: ready
+Status: done
 Depends on: (none — ADR 0002 is accepted)
 
 ## Context
