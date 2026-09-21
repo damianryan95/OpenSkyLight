@@ -9,3 +9,6 @@ Thumbs.db
 .vite/
 coverage/
 backups/
+
+# Personal Claude Code overrides; project settings.json is committed
+.claude/settings.local.json
