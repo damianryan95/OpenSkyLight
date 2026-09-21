@@ -55,6 +55,20 @@ function safeName(value: string | undefined): string { const name = basename(val
 function invalid(): never { throw new DomainValidationError('The uploaded file is not a supported, valid PNG, JPEG, GIF, or WebP image.') }
 
 /**
+ * A complete JPEG contains an end-of-image marker, but it is not required to be
+ * the final bytes: cameras and phones routinely append metadata after it —
+ * a Samsung photo tested here carried 275 trailing bytes. Requiring the file to
+ * *end* with EOI, the way PNG ends with IEND, rejected every real photograph.
+ * Searching backwards still catches a truncated file while accepting real ones.
+ */
+function hasJpegEnd(bytes: Buffer): boolean {
+  for (let i = bytes.length - 2; i >= 2; i -= 1) {
+    if (bytes[i] === 0xff && bytes[i + 1] === 0xd9) return true
+  }
+  return false
+}
+
+/**
  * Family photos are overwhelmingly JPEG, so the screensaver needs it even
  * though celebrations never did. Dimensions come from the first SOF frame
  * header; the segment walk also proves the file is structurally a JPEG rather
@@ -80,7 +94,7 @@ function inspectJpeg(bytes: Buffer): { width: number; height: number } {
 }
 function inspectImage(bytes: Buffer): { mediaType: 'image/png' | 'image/gif' | 'image/webp' | 'image/jpeg'; width: number; height: number; frameCount: number } {
   let result: { mediaType: 'image/png' | 'image/gif' | 'image/webp' | 'image/jpeg'; width: number; height: number; frameCount: number }
-  if (bytes.length > 3 && bytes[0] === 0xff && bytes[1] === 0xd8 && bytes[bytes.length - 2] === 0xff && bytes[bytes.length - 1] === 0xd9) { const jpeg = inspectJpeg(bytes); result = { mediaType: 'image/jpeg', width: jpeg.width, height: jpeg.height, frameCount: 1 } }
+  if (bytes.length > 3 && bytes[0] === 0xff && bytes[1] === 0xd8 && hasJpegEnd(bytes)) { const jpeg = inspectJpeg(bytes); result = { mediaType: 'image/jpeg', width: jpeg.width, height: jpeg.height, frameCount: 1 } }
   else if (bytes.subarray(0, 8).equals(Buffer.from([137,80,78,71,13,10,26,10]))) { if (bytes.length < 45 || bytes.toString('ascii', 12, 16) !== 'IHDR' || bytes.toString('ascii', bytes.length - 8, bytes.length - 4) !== 'IEND') invalid(); result = { mediaType: 'image/png', width: bytes.readUInt32BE(16), height: bytes.readUInt32BE(20), frameCount: 1 } }
   else if (bytes.toString('ascii', 0, 6) === 'GIF87a' || bytes.toString('ascii', 0, 6) === 'GIF89a') {
     if (bytes.length < 14) invalid()

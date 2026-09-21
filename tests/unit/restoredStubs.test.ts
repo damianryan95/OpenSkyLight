@@ -1,4 +1,9 @@
-import { describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it } from 'vitest'
+import { mkdtempSync, rmSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+import { openServerDatabase } from '../../src/server/db'
+import { createMediaService } from '../../src/server/domain/media'
 import { parseFeedXml, createRssService } from '../../src/server/domain/rss'
 
 const rss2 = `<?xml version="1.0"?><rss version="2.0"><channel><title>Test News</title>
@@ -59,5 +64,58 @@ describe('news feed parsing', () => {
     fail = true
     // Cache TTL has not elapsed, but the point is the stale-fallback path exists.
     await expect(service.getFeed('npr')).resolves.toMatchObject({ feedId: 'npr' })
+  })
+})
+
+describe('photo upload validation', () => {
+  const dirs: string[] = []
+  afterEach(() => { for (const d of dirs.splice(0)) rmSync(d, { recursive: true, force: true }) })
+
+  function service() {
+    const dir = mkdtempSync(join(tmpdir(), 'osl-photo-'))
+    dirs.push(dir)
+    const db = openServerDatabase(join(dir, 'p.db'))
+    return { db, media: createMediaService(db.sqlite, join(dir, 'media')) }
+  }
+
+  // Minimal but structurally valid JPEG: SOI, SOF0 declaring 200x100, EOI.
+  const jpegBody = Buffer.from([
+    0xFF, 0xD8, 0xFF, 0xC0, 0x00, 0x11, 0x08, 0x00, 0x64, 0x00, 0xC8, 0x03,
+    0x01, 0x11, 0x00, 0x02, 0x11, 0x01, 0x03, 0x11, 0x01, 0xFF, 0xD9
+  ])
+
+  it('accepts a JPEG that carries metadata after its end marker', async () => {
+    const { db, media } = service()
+    // Real camera and phone JPEGs append data after EOI; a Samsung photo that
+    // broke this carried 275 trailing bytes. Requiring the file to end with
+    // EOI rejected every genuine photograph.
+    const withTrailer = Buffer.concat([jpegBody, Buffer.from('SEFT trailing metadata', 'utf8')])
+
+    const asset = await media.upload({ bytes: withTrailer, contentType: 'image/jpeg', originalName: 'family.jpg', kind: 'photo' })
+
+    expect(asset).toMatchObject({ mediaType: 'image/jpeg', width: 200, height: 100 })
+    db.close()
+  })
+
+  it('accepts a plain JPEG and reads its dimensions from the frame header', async () => {
+    const { db, media } = service()
+    const asset = await media.upload({ bytes: jpegBody, contentType: 'image/jpeg', originalName: 'plain.jpg', kind: 'photo' })
+    expect(asset).toMatchObject({ width: 200, height: 100 })
+    db.close()
+  })
+
+  it('still rejects a truncated JPEG that never reaches its end marker', async () => {
+    const { db, media } = service()
+    const truncated = jpegBody.subarray(0, jpegBody.length - 2)
+    await expect(media.upload({ bytes: truncated, contentType: 'image/jpeg', originalName: 'cut.jpg', kind: 'photo' }))
+      .rejects.toThrow(/not a supported, valid/)
+    db.close()
+  })
+
+  it('still rejects a file that only pretends to be an image', async () => {
+    const { db, media } = service()
+    await expect(media.upload({ bytes: Buffer.from('definitely not an image'), contentType: 'image/jpeg', originalName: 'evil.jpg', kind: 'photo' }))
+      .rejects.toThrow()
+    db.close()
   })
 })
