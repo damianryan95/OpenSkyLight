@@ -86,6 +86,22 @@ add B.
   simply add it back as a CalDAV source — Google serves CalDAV with an
   app-specific password — or via the phone connector.
 
+## Clarification (2026-09-21): OpenSkyLight is itself a calendar
+
+This ADR describes how OpenSkyLight *reads* calendars, and that remains
+correct. It should not be read as saying the board is only a mirror.
+
+OpenSkyLight is also a calendar in its own right. An event may be authored on
+the board and live there and nowhere else. It syncs outward only when a person
+is tagged in it and that person has a linked writable calendar; an untagged
+event, or one tagged with a person who has no writable calendar, stays local
+permanently — the normal outcome, not a failure.
+
+The practical consequence is that a household that connects nothing at all
+still has a working shared family calendar, which suits the non-technical
+operator this product is for. `N15` owns the built-in local calendar and states
+the routing rule in full; `N06` owns the outward write path it depends on.
+
 ## Non-goals
 
 - Writing a bespoke integration per calendar vendor. Only OS-native APIs and

@@ -15,10 +15,23 @@ This ticket was previously a blocked decision spike. The direction is
 decided; what remains is genuine engineering design, so expect to produce a
 short design note before implementing.
 
+## What "bidirectional" actually means here
+
+OpenSkyLight is a calendar in its own right, not only a cache of other
+people's. An event authored in OpenSkyLight lives on the OpenSkyLight calendar
+and syncs outward **only** when a person is tagged in it and that person has a
+linked writable calendar. An untagged event, or one tagged with a person who
+has no writable calendar, stays local — permanently and correctly, not as a
+failure state.
+
+So this ticket is not "every local change is pushed everywhere". It is the
+write path for the subset that has somewhere to go. `N15` states the routing
+rule in full and owns the built-in local calendar that makes it possible.
+
 ## Deliverable
 
 Let a parent add and edit events from OpenSkyLight, and have those changes
-reach the underlying calendar.
+reach the underlying calendar where the routing rule says they should.
 
 - Write-back through the phone-native connector (`N05`), using the OS calendar
   APIs, for phone-sourced calendars.

@@ -28,21 +28,55 @@ reinventing:
 The on-screen keyboard those relied on (`src/renderer/src/components/Osk.tsx`)
 still exists in this fork.
 
+## OpenSkyLight is itself a calendar
+
+This is the premise the rest of the ticket rests on, and it is a change of
+model rather than a detail. The board is not only a cache of other people's
+calendars — it is a calendar in its own right, and an event may live there and
+nowhere else.
+
+The routing rule follows from that, and it has no gaps:
+
+- An event created on the board belongs to the **OpenSkyLight calendar** by
+  default.
+- It syncs outward **only** when a person is tagged in it **and** that person
+  has a linked writable calendar. Then it is written to that person's calendar.
+- A tagged person with **no** linked calendar: the event simply stays on the
+  OpenSkyLight calendar. This is the normal outcome, not a failure, and must
+  not surface as an error or a warning.
+- A Family event with **no** tagged person: likewise stays on the OpenSkyLight
+  calendar.
+
+So local is the default and syncing outward is the special case — not the
+reverse. A household that never connects any calendar still has a fully usable
+shared family calendar, which is the behaviour the product's non-technical
+target operator should get for free.
+
+**Schema gap this exposes.** There is currently no way to represent the board's
+own calendar: `calendar_sources.kind` permits only `caldav`, `ics` and `phone`.
+The client type already anticipates it — `CalendarProvider` in
+`src/shared/types/index.ts` still carries `'local'`, inherited from upstream,
+where local calendars existed. A `local` source kind is therefore a
+prerequisite of this ticket, and the OpenSkyLight calendar should exist from
+first boot so the board always has somewhere to put an event.
+
 ## Deliverable
 
 Let a parent create, edit and delete calendar events directly on a wall
-display, with the change reaching the underlying calendar rather than living
-only in the local cache.
+display, following the routing rule above.
 
-- **Route each event to the right calendar.** `calendars.audience_person_id`
-  already maps a calendar to a household member, so an event created for a
-  person goes to that person's linked calendar. Define and implement the rule
-  for the two gaps: a person with no linked writable calendar, and a Family
-  event with no mapped person. Neither may silently write to an arbitrary
-  calendar.
+- **Add the built-in OpenSkyLight calendar.** Extend the source kinds with
+  `local`, seed exactly one such calendar on first boot, and make it the
+  default destination for anything created on the board. It is never synced,
+  never fetched, and never deleted by a source removal.
+- **Implement the outward rule.** Tagging a person whose calendar is writable
+  writes the event there; everything else stays local. Changing an event's
+  tagged person after the fact needs a defined outcome — decide it explicitly
+  rather than leaving it to whichever write happens last.
 - **Respect read-only sources.** ICS feeds cannot be written, and CalDAV
   collections report their own privileges (`N14` already captures `readOnly`).
-  A calendar that cannot accept a write must not be offered as a destination.
+  A person whose only linked calendar is read-only is treated exactly like a
+  person with none: the event stays local, silently and correctly.
 - **Gate it behind the household PIN.** A display sits on a wall where any
   child can reach it. Editing events is a parent action. The existing
   `displayLayoutEditUntil` unlock — `auth:verifyPin` grants a bounded editing
@@ -60,13 +94,17 @@ kiosk RPC routes in `src/server/api/router.ts`, the write path from `N06`,
 
 ## Acceptance
 
-- A parent unlocks a display with the household PIN, creates an event, and it
-  appears in the linked person's own calendar app.
-- Editing and deleting an existing event propagate the same way.
+- A parent unlocks a display with the household PIN, creates an event tagged
+  with a person who has a linked writable calendar, and it appears in that
+  person's own calendar app.
+- An event with no tagged person, or tagged with a person who has no writable
+  calendar, stays on the OpenSkyLight calendar, shows on the board, and
+  produces no error or warning anywhere.
+- A household with no calendar connected at all can still create, edit and
+  delete events on the board and see them persist across a restart.
+- Editing and deleting an existing synced event propagate the same way.
 - A locked display cannot create, edit, or delete anything; the editing window
   expires without leaving a writable surface behind.
-- A read-only calendar is never offered as a destination, and a person with no
-  writable calendar produces a clear explanation rather than a failed write.
 - Editing a single occurrence leaves the rest of the series intact.
 - Everything K03 still covers — chores beyond today, lists, meals, rewards,
   household settings — remains refused from a display, with its tests updated
