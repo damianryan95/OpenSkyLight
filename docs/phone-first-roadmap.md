@@ -61,6 +61,27 @@ project owner and recorded as ADRs. They are now implementation tickets.
   write scope, because writes go through the phone's own calendar store or an
   authenticated CalDAV collection. Ticket `N06`.
 
+## 3a. Target device and distribution (2026-09-22)
+
+The product becomes **a polished self-hosted application running on a small
+computer**, with **Portainer kept as a deployable option for the more technical
+individual**. Portainer is the advanced path; the default does not yet exist,
+which is what `N16` addresses.
+
+The device is deliberately **open, and unlikely to be a Raspberry Pi**. An x86
+mini PC is the probable shape. Two consequences worth holding onto:
+
+- **Cross-building disappears.** Same architecture as CI and the development
+  machines, so the arm64 emulation problems hit during deployment stop applying.
+- **Headroom returns.** A Pi 3B+ cannot run the server and a browser together;
+  the current Pi is a **test rig only**, with `home-server` hosting and the Pi
+  running Chromium.
+
+Ticket assumptions that this changes are noted in `O02` and `N16`. `N02`'s
+Wi-Fi access-point pairing is written Pi-first and should not be rewritten
+until the device is chosen — on a box with ethernet, first-boot pairing may not
+need an access point at all.
+
 ### Known tradeoff to watch
 
 Mobile platforms restrict background execution, so a phone-native-only sync
@@ -141,6 +162,7 @@ O02 --> N12
 | N05 | Phone-native calendar connector | planned | N13 |
 | N06 | Bidirectional calendar sync | planned | N05, N14 |
 | N15 | On-screen calendar editing | planned | N06 |
+| N16 | Install experience for a non-technical household | planned | a distribution ADR |
 | N02 | Pi first-boot Wi-Fi AP pairing | planned | O02 |
 | N03 | Local network name for the server | planned | S06, O03 |
 | N04 | Phone-first setup wizard | planned | N02, N03, P01 |

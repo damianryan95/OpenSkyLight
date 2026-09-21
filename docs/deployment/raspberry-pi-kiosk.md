@@ -15,6 +15,13 @@ database process. Do not expose the server to the public Internet.
 > validated on real Pi hardware**. Follow the checklist below and record the
 > result before treating this setup as supported in production.
 
+> **Scope note (2026-09-22).** This is **one** supported kiosk recipe, not the
+> only one. The target device for the finished product is open and unlikely to
+> be a Raspberry Pi — see `docs/phone-first-roadmap.md` section 3a and `N16`.
+> The instructions below assume the server runs elsewhere on the LAN, which is
+> also the current test arrangement: `home-server` hosts the application and a
+> Raspberry Pi 3B+ runs Chromium. A Pi 3B+ has 1GB of RAM and cannot host both.
+
 ## Prerequisites
 
 The server URL must return the browser kiosk application's `index.html` at `/`
