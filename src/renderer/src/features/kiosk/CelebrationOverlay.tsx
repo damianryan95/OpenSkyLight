@@ -6,13 +6,18 @@ import { fetchDisplayCelebration } from '../../api/browser'
 import { usePeople } from '../../api/hooks'
 
 const PLACEHOLDER_DURATION_MS = 1_500
+const SUMMARY_DURATION_MS = 2_500
 
 const EMPTY_QUEUE: CelebrationQueueState = { active: null, pending: [], overflowCount: 0 }
 
 /**
- * Deliberately minimal host for a future full-screen celebration animation.
- * It is presentation-only: the server has already committed the chore before
- * this event is delivered, and subscriber/render failures remain local.
+ * Presentation-only: the server has already committed the chore before this
+ * event arrives, so a subscriber or render failure stays local and can never
+ * affect the completion.
+ *
+ * The queue keeps at most three individual celebrations. Rapid completions
+ * beyond that collapse into one summary shown as the backlog drains, so a
+ * family is never made to watch a long procession.
  */
 function CelebrationOverlay(): JSX.Element | null {
   const [queue, dispatch] = useReducer(celebrationQueueReducer, EMPTY_QUEUE)
@@ -43,7 +48,35 @@ function CelebrationOverlay(): JSX.Element | null {
     return () => window.clearTimeout(timer)
   }, [queue.active?.completionId, person?.celebrationDurationMs])
 
-  if (queue.active === null) return null
+  // Once the backlog drains, anything that overflowed the three-deep cap is
+  // acknowledged as one summary rather than made to queue for its own turn.
+  const overflow = queue.overflowCount ?? 0
+  useEffect(() => {
+    if (queue.active !== null || overflow === 0) return
+    const timer = window.setTimeout(() => dispatch({ type: 'clearOverflow' }), SUMMARY_DURATION_MS)
+    return () => window.clearTimeout(timer)
+  }, [queue.active, overflow])
+
+  if (queue.active === null) {
+    if (overflow === 0) return null
+    return (
+      <div
+        aria-atomic="true"
+        aria-live="polite"
+        className="pointer-events-none fixed inset-0 z-[95] grid place-items-center bg-amber-100/15 p-8"
+        data-testid="celebration-summary"
+        role="status"
+      >
+        <div className="celebration-card rounded-[2rem] bg-white/95 p-6 text-center shadow-2xl">
+          <div className="text-6xl" aria-hidden="true">🎉</div>
+          <span className="mt-3 block text-2xl font-bold text-amber-700">
+            Great teamwork — {overflow} more {overflow === 1 ? 'chore' : 'chores'} done!
+          </span>
+        </div>
+      </div>
+    )
+  }
+
   return (
     <div
       aria-atomic="true"
