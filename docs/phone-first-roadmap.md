@@ -161,7 +161,7 @@ O02 --> N12
 | N01 | Removed-functionality audit | ready | — |
 | N13 | Retire the Google OAuth layer | ready | — |
 | N14 | CalDAV and ICS calendar source | planned | N13 |
-| N05 | Phone-native calendar connector | planned | N13 |
+| N05 | Phone-native calendar connector | planned | N13 (ADR 0005 decided) |
 | N06 | Bidirectional calendar sync | planned | N05, N14 |
 | N15 | On-screen calendar editing | planned | N06 |
 | N16 | Install experience for a non-technical household | planned | — (ADR 0004 decided) |

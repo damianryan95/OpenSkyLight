@@ -1,7 +1,7 @@
 # N05 - Phone-native calendar connector
 
 Status: planned
-Depends on: N13
+Depends on: N13; delivery vehicle settled by ADR 0005
 
 ## Context
 
@@ -34,10 +34,20 @@ restricted on both mobile platforms, so freshness tracks phone usage. A
 household that needs guaranteed freshness adds a CalDAV source (`N14`)
 alongside this; both sources coexist under the same schema.
 
-This requires a native or hybrid mobile capability that the current
-browser-based companion app does not have. Establishing that delivery vehicle
-is part of this ticket's scoping and may justify splitting it once the
-approach is chosen. Report the split rather than silently expanding scope.
+[ADR 0005](../adr/0005-phone-app-delivery-vehicle.md) settles the delivery
+vehicle: **Capacitor**, wrapping the existing companion rather than forking it.
+The web app at `/admin/` keeps working unchanged for households that install
+nothing.
+
+What remains open and belongs to this ticket: plugin selection for calendar
+access, the permission flows on both platforms, the push contract and its
+idempotency, and how the app is built in CI. Splitting the ticket once that is
+scoped is reasonable — report the split rather than silently expanding.
+
+Note the constraint ADR 0005 restates: Capacitor does **not** remove mobile
+background-execution limits. A phone-sourced calendar still goes stale when
+nobody opens the app, which is why `N14` stays first-class. Do not let this
+ticket's existence become an argument for removing the server-side source.
 
 Likely files: companion app mobile layer (new), a push API route in
 `src/server/api/router.ts`, `src/shared/api/contract.ts`,
