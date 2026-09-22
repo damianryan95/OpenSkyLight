@@ -40,7 +40,7 @@ Consequences, which this plan assumes throughout:
 
 ## Milestone 1 — Calendar independence
 
-**Tickets:** `N13` + `N14` (shipped together), then `N05`
+**Tickets:** `N13` + `N14` (shipped together), then `N17`, then `N05`
 **Blocked by:** nothing — deliberately has no hardware dependency
 **Goal:** the product syncs any calendar, with no Google Cloud project, client
 secret, domain, or HTTPS prerequisite.
@@ -48,6 +48,10 @@ secret, domain, or HTTPS prerequisite.
 `N13` removes the only calendar source the product currently has, so the phase
 is only coherent once `N14` lands beside it. Both are built before this
 milestone is pushed.
+
+`N17` sits here because `N05` cannot authenticate without it: the parent auth
+model was same-origin by construction and a phone app is not same-origin. It
+has no hardware dependency either, and it also gates `N18` in Milestone 2.
 
 Sequence:
 
@@ -77,7 +81,7 @@ migration sequence, and a fresh volume builds cleanly.
 
 ## Milestone 2 — Phone-first onboarding
 
-**Tickets:** `N02`, `N03`, `N04`, and the already-open `O02` / `O04`
+**Tickets:** `N02`, `N03`, `N18`, `N04`, and the already-open `O02` / `O04`
 **Blocked by:** `O02` needs real Raspberry Pi 5 hardware
 **Goal:** a parent with a factory Pi and a phone reaches a working kiosk with
 no keyboard, monitor, or documentation.
@@ -87,7 +91,13 @@ Milestone 1's slack time. `N02` and `N04` cannot start until `O02` produces
 real-hardware evidence, so **acquiring the Pi is the scheduling priority here**,
 not writing code.
 
-Sequence: `N03` → (`O02` evidence) → `N02` → `N04` → `O04` closes out.
+`N18` is the ceremony ADR 0006 settled — the screen displays a QR, the phone
+scans it — and it is what `N04`'s wizard is entered through. It depends on
+`N17` rather than on hardware, so like `N03` it can be pulled forward while the
+Pi is unavailable. It also removes most of `N03`'s job for app clients, since
+the QR carries the server address; `N03` still matters for the browser.
+
+Sequence: `N03` → `N18` → (`O02` evidence) → `N02` → `N04` → `O04` closes out.
 
 **Exit criteria:** `O02` and `O04` both move off blocked with recorded hardware
 results, and the wizard path is proven end-to-end on a factory image.

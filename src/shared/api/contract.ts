@@ -40,6 +40,21 @@ export const updateDisplayRequestSchema = displaySettingsSchema.extend({ name: z
 )
 export const registeredDisplaySchema = displayDeviceSchema.extend({ credential: z.string().min(1) })
 
+/** A paired parent phone. It carries none of a display's kiosk state, and its
+ * credential is parent-level, so it appears only in the pairing response. */
+export const parentDeviceSchema = z.object({
+  id: z.string().min(1),
+  name: z.string().min(1),
+  pairedAt: z.string().datetime(),
+  lastSeenAt: z.string().datetime().nullable(),
+  revokedAt: z.string().datetime().nullable()
+})
+export const pairParentDeviceRequestSchema = z.object({
+  pin: z.string().min(1),
+  name: z.string().min(1).max(120)
+}).strict()
+export const pairedParentDeviceSchema = parentDeviceSchema.extend({ credential: z.string().min(1) })
+
 /** A display may submit a date, but the server compares it to household today. */
 export const displayChoreCommandRequestSchema = z.object({
   dueDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'dueDate must be an ISO calendar date')
@@ -254,6 +269,9 @@ export type CelebrationEvent = z.infer<typeof celebrationEventSchema>
 export type SyncStatus = z.infer<typeof syncStatusEventSchema>
 export type DisplayDevice = z.infer<typeof displayDeviceSchema>
 export type RegisteredDisplay = z.infer<typeof registeredDisplaySchema>
+export type ParentDeviceDto = z.infer<typeof parentDeviceSchema>
+export type PairedParentDeviceDto = z.infer<typeof pairedParentDeviceSchema>
+export type PairParentDeviceRequest = z.infer<typeof pairParentDeviceRequestSchema>
 export type PersonDto = z.infer<typeof personSchema>
 export type CalendarSourceDto = z.infer<typeof calendarSourceSchema>
 export type DiscoveredCalendarDto = z.infer<typeof discoveredCalendarSchema>

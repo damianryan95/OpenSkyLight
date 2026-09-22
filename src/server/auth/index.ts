@@ -43,6 +43,19 @@ export interface RegisteredDisplay extends DisplayDevice {
   credential: string
 }
 
+export interface ParentDevice {
+  id: string
+  name: string
+  pairedAt: string
+  lastSeenAt: string | null
+  revokedAt: string | null
+}
+
+export interface PairedParentDevice extends ParentDevice {
+  /** Returned exactly once, to the PIN-authenticated pairing caller. */
+  credential: string
+}
+
 export interface AuthClock {
   now(): Date
 }
@@ -173,26 +186,89 @@ export class HouseholdAuthService {
 }
 
 /**
+ * The bearer-credential mechanics shared by the display and parent registries:
+ * mint a high-entropy secret, persist only its SHA-256 digest, resolve a device
+ * from a presented secret, touch it, and revoke it.
+ *
+ * The two registries stay separate services over separate tables on purpose
+ * (see migration 010): a parent credential is far more powerful than a display
+ * one, and only this narrow mechanical core is genuinely common to both. Table
+ * and column names are interpolated, which is safe here and only here because
+ * both call sites are string literals in this file — no caller supplies them.
+ */
+class CredentialRegistry {
+  constructor(
+    private readonly sqlite: Database.Database,
+    private readonly table: 'devices' | 'parent_devices',
+    private readonly columns: string,
+    private readonly issuedAtColumn: 'registered_at' | 'paired_at',
+    private readonly notFoundMessage: string
+  ) {}
+
+  mint(): { id: string, credential: string, credentialHash: Buffer } {
+    const credential = randomBytes(32).toString('base64url')
+    return { id: randomBytes(16).toString('hex'), credential, credentialHash: hashSecret(credential) }
+  }
+
+  findById(id: string): unknown | undefined {
+    return this.sqlite.prepare(`SELECT ${this.columns} FROM ${this.table} WHERE id = ?`).get(id)
+  }
+
+  all(): unknown[] {
+    return this.sqlite.prepare(`SELECT ${this.columns} FROM ${this.table} ORDER BY ${this.issuedAtColumn}, id`).all()
+  }
+
+  /**
+   * `revoked_at IS NULL` is filtered in SQL rather than against any cached set
+   * of devices, so a revoked credential fails closed on the very next request.
+   */
+  findByCredential(credential: string | undefined): unknown | undefined {
+    if (credential === undefined || credential.length === 0) return undefined
+    const presented = hashSecret(credential)
+    const row = this.sqlite.prepare(
+      `SELECT ${this.columns}, credential_hash FROM ${this.table} WHERE credential_hash = ? AND revoked_at IS NULL`
+    ).get(presented) as { credential_hash: Buffer } | undefined
+    if (row === undefined || !safeEqual(presented, row.credential_hash)) return undefined
+    return row
+  }
+
+  touch(id: string, at: string): void {
+    this.sqlite.prepare(`UPDATE ${this.table} SET last_seen_at = ? WHERE id = ?`).run(at, id)
+  }
+
+  revoke(id: string, at: string): void {
+    const result = this.sqlite.prepare(`UPDATE ${this.table} SET revoked_at = COALESCE(revoked_at, ?) WHERE id = ?`).run(at, id)
+    if (result.changes === 0) throw new AuthError(401, 'unauthorized', this.notFoundMessage)
+  }
+}
+
+const DISPLAY_COLUMNS = 'id, name, home_layout, theme_preference, sleep_settings, kiosk_preferences, registered_at, last_seen_at, revoked_at'
+const PARENT_DEVICE_COLUMNS = 'id, name, paired_at, last_seen_at, revoked_at'
+
+/**
  * Central registry for kiosk devices.  The device credential is a high-entropy
  * bearer secret; only its SHA-256 digest is persisted and ordinary display DTOs
  * deliberately omit it.
  */
 export class DisplayDeviceService {
+  private readonly credentials: CredentialRegistry
+
   constructor(
     private readonly sqlite: Database.Database,
     private readonly clock: AuthClock = systemClock
-  ) {}
+  ) {
+    this.credentials = new CredentialRegistry(sqlite, 'devices', DISPLAY_COLUMNS, 'registered_at', 'Display was not found')
+  }
 
   register(input: { name: string, homeLayout?: unknown, themePreference?: unknown, sleepSettings?: unknown, kioskPreferences?: unknown }): RegisteredDisplay {
-    const name = assertDeviceName(input.name)
+    const name = assertDeviceName(input.name, 'Display')
     const now = this.now()
-    const id = randomBytes(16).toString('hex')
-    const credential = randomBytes(32).toString('base64url')
+    const { id, credential, credentialHash } = this.credentials.mint()
     try {
       this.sqlite.prepare(
         `INSERT INTO devices (id, name, credential_hash, home_layout, theme_preference, sleep_settings, kiosk_preferences, registered_at)
          VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
-      ).run(id, name, hashSecret(credential), jsonOrNull(input.homeLayout), jsonOrNull(input.themePreference), jsonOrNull(input.sleepSettings), jsonOrNull(input.kioskPreferences), now)
+      ).run(id, name, credentialHash, jsonOrNull(input.homeLayout), jsonOrNull(input.themePreference), jsonOrNull(input.sleepSettings), jsonOrNull(input.kioskPreferences), now)
     } catch (error) {
       if (isUniqueConstraint(error)) throw new AuthError(409, 'conflict', 'A display with that name already exists')
       throw error
@@ -201,15 +277,13 @@ export class DisplayDeviceService {
   }
 
   list(): DisplayDevice[] {
-    return this.sqlite.prepare(
-      'SELECT id, name, home_layout, theme_preference, sleep_settings, kiosk_preferences, registered_at, last_seen_at, revoked_at FROM devices ORDER BY registered_at, id'
-    ).all().map(rowToDisplay)
+    return this.credentials.all().map(rowToDisplay)
   }
 
   update(id: string, input: { name?: string, homeLayout?: unknown, themePreference?: unknown, sleepSettings?: unknown, kioskPreferences?: unknown }): DisplayDevice {
     const existing = this.getById(id)
     if (existing === undefined) throw new AuthError(401, 'unauthorized', 'Display was not found')
-    const name = input.name === undefined ? existing.name : assertDeviceName(input.name)
+    const name = input.name === undefined ? existing.name : assertDeviceName(input.name, 'Display')
     try {
       this.sqlite.prepare(
         `UPDATE devices SET name = ?, home_layout = ?, theme_preference = ?, sleep_settings = ?, kiosk_preferences = ? WHERE id = ?`
@@ -222,27 +296,79 @@ export class DisplayDeviceService {
   }
 
   revoke(id: string): void {
-    const result = this.sqlite.prepare('UPDATE devices SET revoked_at = COALESCE(revoked_at, ?) WHERE id = ?').run(this.now(), id)
-    if (result.changes === 0) throw new AuthError(401, 'unauthorized', 'Display was not found')
+    this.credentials.revoke(id, this.now())
   }
 
   authenticate(credential: string | undefined): DisplayDevice | undefined {
-    if (credential === undefined || credential.length === 0) return undefined
-    const row = this.sqlite.prepare(
-      `SELECT id, name, home_layout, theme_preference, sleep_settings, kiosk_preferences, registered_at, last_seen_at, revoked_at
-       FROM devices WHERE credential_hash = ? AND revoked_at IS NULL`
-    ).get(hashSecret(credential))
+    const row = this.credentials.findByCredential(credential)
     if (row === undefined) return undefined
     const device = rowToDisplay(row)
-    this.sqlite.prepare('UPDATE devices SET last_seen_at = ? WHERE id = ?').run(this.now(), device.id)
-    return { ...device, lastSeenAt: this.now() }
+    const now = this.now()
+    this.credentials.touch(device.id, now)
+    return { ...device, lastSeenAt: now }
   }
 
   private getById(id: string): DisplayDevice | undefined {
-    const row = this.sqlite.prepare(
-      'SELECT id, name, home_layout, theme_preference, sleep_settings, kiosk_preferences, registered_at, last_seen_at, revoked_at FROM devices WHERE id = ?'
-    ).get(id)
+    const row = this.credentials.findById(id)
     return row === undefined ? undefined : rowToDisplay(row)
+  }
+
+  private now(): string { return this.clock.now().toISOString() }
+}
+
+/**
+ * Central registry for paired parent phones. Structurally a sibling of
+ * `DisplayDeviceService`, sharing its credential mechanics but none of its
+ * display-only state (home layout, theme, sleep window, kiosk preferences) —
+ * a phone has no use for any of it.
+ *
+ * A credential here is parent-level, so it is shown exactly once by `pair`,
+ * stored only as a digest, and omitted from every DTO `list` returns.
+ */
+export class ParentDeviceService {
+  private readonly credentials: CredentialRegistry
+
+  constructor(
+    private readonly sqlite: Database.Database,
+    private readonly clock: AuthClock = systemClock
+  ) {
+    this.credentials = new CredentialRegistry(sqlite, 'parent_devices', PARENT_DEVICE_COLUMNS, 'paired_at', 'Paired phone was not found')
+  }
+
+  /** The caller is responsible for having authorised this at parent level. */
+  pair(input: { name: string }): PairedParentDevice {
+    const name = assertDeviceName(input.name, 'Phone')
+    const { id, credential, credentialHash } = this.credentials.mint()
+    try {
+      this.sqlite.prepare('INSERT INTO parent_devices (id, name, credential_hash, paired_at) VALUES (?, ?, ?, ?)')
+        .run(id, name, credentialHash, this.now())
+    } catch (error) {
+      if (isUniqueConstraint(error)) throw new AuthError(409, 'conflict', 'A phone with that name is already paired')
+      throw error
+    }
+    return { ...this.getById(id)!, credential }
+  }
+
+  list(): ParentDevice[] {
+    return this.credentials.all().map(rowToParentDevice)
+  }
+
+  revoke(id: string): void {
+    this.credentials.revoke(id, this.now())
+  }
+
+  authenticate(credential: string | undefined): ParentDevice | undefined {
+    const row = this.credentials.findByCredential(credential)
+    if (row === undefined) return undefined
+    const device = rowToParentDevice(row)
+    const now = this.now()
+    this.credentials.touch(device.id, now)
+    return { ...device, lastSeenAt: now }
+  }
+
+  private getById(id: string): ParentDevice | undefined {
+    const row = this.credentials.findById(id)
+    return row === undefined ? undefined : rowToParentDevice(row)
   }
 
   private now(): string { return this.clock.now().toISOString() }
@@ -274,9 +400,9 @@ function safeEqual(left: Buffer, right: Buffer): boolean {
   return left.length === right.length && timingSafeEqual(left, right)
 }
 
-function assertDeviceName(name: string): string {
+function assertDeviceName(name: string, label: 'Display' | 'Phone'): string {
   const normalized = name.trim()
-  if (normalized.length < 1 || normalized.length > 120) throw new AuthError(401, 'unauthorized', 'Display name must contain 1 to 120 characters')
+  if (normalized.length < 1 || normalized.length > 120) throw new AuthError(401, 'unauthorized', `${label} name must contain 1 to 120 characters`)
   return normalized
 }
 
@@ -291,6 +417,17 @@ function rowToDisplay(row: unknown): DisplayDevice {
     homeLayout: parseJson(record.home_layout), themePreference: parseJson(record.theme_preference),
     sleepSettings: parseJson(record.sleep_settings), kioskPreferences: parseJson(record.kiosk_preferences),
     registeredAt: String(record.registered_at), lastSeenAt: record.last_seen_at === null ? null : String(record.last_seen_at),
+    revokedAt: record.revoked_at === null ? null : String(record.revoked_at)
+  }
+}
+
+/** Deliberately builds an explicit object: credential_hash is never carried. */
+function rowToParentDevice(row: unknown): ParentDevice {
+  const record = row as Record<string, unknown>
+  return {
+    id: String(record.id), name: String(record.name),
+    pairedAt: String(record.paired_at),
+    lastSeenAt: record.last_seen_at === null ? null : String(record.last_seen_at),
     revokedAt: record.revoked_at === null ? null : String(record.revoked_at)
   }
 }

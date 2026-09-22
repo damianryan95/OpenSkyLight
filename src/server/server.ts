@@ -4,7 +4,7 @@ import { createReadStream, existsSync, statSync } from 'node:fs'
 import { extname, resolve, sep } from 'node:path'
 import { sendLiveHealth, sendReadyHealth } from './api/health'
 import { handleApiRequest } from './api/router'
-import { DisplayDeviceService, HouseholdAuthService, PARENT_SESSION_COOKIE } from './auth'
+import { DisplayDeviceService, HouseholdAuthService, ParentDeviceService, PARENT_SESSION_COOKIE } from './auth'
 import type { ServerDatabase } from './db'
 import { createChoresRewardsService, createDisplayReadService, createHouseholdSettingsService, createListsDomain, createMealsDomain, createPeopleService, createMediaService } from './domain'
 import { EventStream, type EventStreamAuthenticator } from './events'
@@ -51,6 +51,7 @@ export function createHeadlessServer(options: HeadlessServerOptions = {}): Headl
   const eventStream = new EventStream()
   const auth = options.database === undefined ? undefined : new HouseholdAuthService(options.database.sqlite)
   const displays = options.database === undefined ? undefined : new DisplayDeviceService(options.database.sqlite)
+  const parentDevices = options.database === undefined ? undefined : new ParentDeviceService(options.database.sqlite)
   const settings = options.database === undefined ? undefined : createHouseholdSettingsService(options.database.sqlite)
   const people = options.database === undefined ? undefined : createPeopleService(options.database.sqlite)
   const media = options.database === undefined || options.mediaDir === undefined ? undefined : createMediaService(options.database.sqlite, options.mediaDir)
@@ -90,11 +91,15 @@ export function createHeadlessServer(options: HeadlessServerOptions = {}): Headl
         const parentToken = readCookie(request, PARENT_SESSION_COOKIE)
         if (auth.getParentSession(parentToken) !== undefined) return { type: 'parent' as const, id: 'household' }
         const credential = readBearerToken(request)
+        // A paired phone presents the same bearer header shape as a display,
+        // so the parent registry is consulted first. Without this a paired app
+        // authenticates on every route yet is blind to live updates.
+        if (parentDevices?.authenticate(credential) !== undefined) return { type: 'parent' as const, id: 'household' }
         const device = displays.authenticate(credential)
         return device === undefined ? undefined : { type: 'display' as const, id: device.id }
       }
     }),
-    ...(auth === undefined || displays === undefined || settings === undefined || chores === undefined || people === undefined || syncStatus === undefined || displayRead === undefined || lists === undefined || meals === undefined ? {} : { auth, displays, settings, chores, people, media, syncStatus, calendarSources, syncScheduler, rss: createRssService(), displayRead, lists, meals, icons: createOnlineIconSearchService() })
+    ...(auth === undefined || displays === undefined || settings === undefined || chores === undefined || people === undefined || syncStatus === undefined || displayRead === undefined || lists === undefined || meals === undefined ? {} : { auth, displays, parentDevices, settings, chores, people, media, syncStatus, calendarSources, syncScheduler, rss: createRssService(), displayRead, lists, meals, icons: createOnlineIconSearchService() })
   }, options.staticDir, options.companionStaticDir)
   let started: StartedHeadlessServer | undefined
 

@@ -157,9 +157,13 @@ Product and technical direction: [`phone-first-roadmap.md`](../phone-first-roadm
 - [N15 - On-screen calendar editing](N15-on-screen-calendar-editing.md)
 - [N16 - Install experience for a non-technical household](N16-install-experience.md)
 - [N17 - Parent app pairing and token authentication](N17-parent-app-pairing.md)
+- [N18 - Screen-displayed QR enrolment and household claim](N18-screen-qr-enrolment.md)
 
-`N01`, `N13` and `N14` are done; `N17` is the next ready ticket and gates
-`N05`. The calendar direction is set by
+`N01`, `N13` and `N14` are done; `N17` is done and gates both `N05` and
+`N18`. The pairing ceremony is set by
+[ADR 0006](../adr/0006-screen-initiated-pairing.md): the screen displays a QR
+and the phone scans it, which supersedes `A03`'s fragment-link enrolment and
+changes how `N04`'s wizard is entered. The calendar direction is set by
 [ADR 0002](../adr/0002-provider-agnostic-calendar-access.md), which supersedes
 ADR 0001 and removes the Google OAuth layer; the remote-access direction is set
 by [ADR 0003](../adr/0003-self-hosted-remote-access.md). Treat `G01`–`G05` as

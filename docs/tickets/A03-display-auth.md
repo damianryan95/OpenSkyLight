@@ -1,7 +1,16 @@
 # A03 - Implement display registration and capabilities
 
-Status: done  
+Status: done (enrolment ceremony superseded)  
 Depends on: A01, A02, S02
+
+> **The ceremony here is superseded by
+> [ADR 0006](../adr/0006-screen-initiated-pairing.md).** The server model below
+> is still current and still correct — named displays, revocable credentials,
+> display-read versus parent capabilities, credentials never in a DTO. What
+> changed is how a credential reaches a screen: the fragment enrolment link
+> (`/#displayCredential=…`) is replaced by the screen displaying a QR that a
+> parent's phone scans. Build enrolment from
+> [`N18`](N18-screen-qr-enrolment.md), not from this ticket.
 
 ## Context
 

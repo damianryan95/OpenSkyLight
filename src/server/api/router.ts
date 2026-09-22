@@ -1,8 +1,8 @@
 import type { IncomingMessage, ServerResponse } from 'node:http'
 import { z } from 'zod'
 import { DateTime } from 'luxon'
-import { addListItemRequestSchema, apiContract, apiInfoResponseSchema, choreCorrectionRequestSchema, connectCalDavRequestSchema, connectIcsRequestSchema, setCalendarSelectionRequestSchema, createChoreRequestSchema, createListRequestSchema, createPersonRequestSchema, createRewardRequestSchema, displayChoreCommandRequestSchema, mealRangeRequestSchema, mealSlotKindSchema, redeemRewardRequestSchema, registerDisplayRequestSchema, setMealRequestSchema, setMealTemplateRequestSchema, starAdjustmentRequestSchema, updateChoreRequestSchema, updateDisplayRequestSchema, updateHouseholdSettingsRequestSchema, updateListRequestSchema, updatePersonRequestSchema, updateRewardRequestSchema } from '../../shared/api/contract'
-import { AuthError, CSRF_HEADER, DisplayDeviceService, HouseholdAuthService, PARENT_SESSION_COOKIE } from '../auth'
+import { addListItemRequestSchema, apiContract, apiInfoResponseSchema, choreCorrectionRequestSchema, connectCalDavRequestSchema, connectIcsRequestSchema, setCalendarSelectionRequestSchema, createChoreRequestSchema, createListRequestSchema, createPersonRequestSchema, createRewardRequestSchema, displayChoreCommandRequestSchema, mealRangeRequestSchema, mealSlotKindSchema, pairParentDeviceRequestSchema, redeemRewardRequestSchema, registerDisplayRequestSchema, setMealRequestSchema, setMealTemplateRequestSchema, starAdjustmentRequestSchema, updateChoreRequestSchema, updateDisplayRequestSchema, updateHouseholdSettingsRequestSchema, updateListRequestSchema, updatePersonRequestSchema, updateRewardRequestSchema } from '../../shared/api/contract'
+import { AuthError, CSRF_HEADER, DisplayDeviceService, HouseholdAuthService, ParentDeviceService, PARENT_SESSION_COOKIE } from '../auth'
 import { type ChoresRewardsService, type DisplayReadService, type HouseholdSettingsService, type ListsDomain, type MealsDomain, type PeopleService, type MediaService } from '../domain'
 import { createReadStream } from 'node:fs'
 import type { EventStream, EventStreamAuthenticator } from '../events'
@@ -18,6 +18,7 @@ export interface ApiRouterDependencies {
   eventStreamAuthenticator?: EventStreamAuthenticator
   auth?: HouseholdAuthService
   displays?: DisplayDeviceService
+  parentDevices?: ParentDeviceService
   chores?: ChoresRewardsService
   settings?: HouseholdSettingsService
   people?: PeopleService
@@ -40,6 +41,11 @@ const connectCalendarSourceRequestSchema = z.discriminatedUnion('kind', [
   connectCalDavRequestSchema.extend({ kind: z.literal('caldav') }),
   connectIcsRequestSchema.extend({ kind: z.literal('ics') })
 ])
+
+function requireParentDevices(dependencies: ApiRouterDependencies): ParentDeviceService {
+  if (dependencies.parentDevices === undefined) throw new ApiRequestError(503, 'service_unavailable', 'Phone pairing is unavailable')
+  return dependencies.parentDevices
+}
 
 function requireSources(dependencies: ApiRouterDependencies): CalendarSourceService {
   if (dependencies.calendarSources === undefined) throw new ApiRequestError(503, 'service_unavailable', 'Calendar sources are unavailable')
@@ -121,9 +127,9 @@ export async function handleApiRequest(request: IncomingMessage, response: Serve
 
     if (path === '/api/v1/household/settings') {
       if (dependencies.settings === undefined) throw new ApiRequestError(503, 'service_unavailable', 'Household settings are unavailable')
-      if (method === 'GET') { requireParentRead(auth, request); sendJson(response, 200, dependencies.settings.get()); return true }
+      if (method === 'GET') { requireParentRead(dependencies, request); sendJson(response, 200, dependencies.settings.get()); return true }
       if (method === 'PATCH') {
-        requireParentMutation(auth, request)
+        requireParentMutation(dependencies, request)
         const input = await readJsonBody(request, updateHouseholdSettingsRequestSchema)
         if (input.timezone !== undefined) dependencies.settings.setTimezone(input.timezone)
         const settings = input.weather === undefined ? dependencies.settings.get() : dependencies.settings.setWeather(input.weather)
@@ -134,7 +140,7 @@ export async function handleApiRequest(request: IncomingMessage, response: Serve
     }
     if (path === '/api/v1/weather/locations') {
       if (method !== 'GET') throw new ApiRequestError(405, 'method_not_allowed', `Method ${method} is not allowed`)
-      requireParentRead(auth, request)
+      requireParentRead(dependencies, request)
       sendJson(response, 200, { locations: await searchWeatherLocations(url.searchParams.get('q') ?? '') })
       return true
     }
@@ -142,12 +148,12 @@ export async function handleApiRequest(request: IncomingMessage, response: Serve
     if (path === '/api/v1/people') {
       if (dependencies.people === undefined) throw new ApiRequestError(503, 'service_unavailable', 'People service is unavailable')
       if (method === 'GET') {
-        requireParentRead(auth, request)
+        requireParentRead(dependencies, request)
         sendJson(response, 200, { people: dependencies.people.list() })
         return true
       }
       if (method === 'POST') {
-        requireParentMutation(auth, request)
+        requireParentMutation(dependencies, request)
         sendJson(response, 201, dependencies.people.create(await readJsonBody(request, createPersonRequestSchema)))
         return true
       }
@@ -156,15 +162,15 @@ export async function handleApiRequest(request: IncomingMessage, response: Serve
 
     if (path === '/api/v1/media/celebrations') {
       if (dependencies.media === undefined) throw new ApiRequestError(503, 'service_unavailable', 'Celebration media is unavailable')
-      if (method === 'GET') { requireParentRead(auth, request); sendJson(response, 200, { assets: dependencies.media.list() }); return true }
-      if (method === 'POST') { requireParentMutation(auth, request); const asset = await dependencies.media.upload({ bytes: await readBinaryBody(request), contentType: readHeader(request, 'content-type'), originalName: readHeader(request, 'x-osl-file-name') }); sendJson(response, 201, asset); return true }
+      if (method === 'GET') { requireParentRead(dependencies, request); sendJson(response, 200, { assets: dependencies.media.list() }); return true }
+      if (method === 'POST') { requireParentMutation(dependencies, request); const asset = await dependencies.media.upload({ bytes: await readBinaryBody(request), contentType: readHeader(request, 'content-type'), originalName: readHeader(request, 'x-osl-file-name') }); sendJson(response, 201, asset); return true }
       throw new ApiRequestError(405, 'method_not_allowed', `Method ${method} is not allowed`)
     }
     if (path === '/api/v1/media/photos') {
       if (dependencies.media === undefined) throw new ApiRequestError(503, 'service_unavailable', 'Photo media is unavailable')
-      if (method === 'GET') { requireParentRead(auth, request); sendJson(response, 200, { assets: dependencies.media.listPhotos() }); return true }
+      if (method === 'GET') { requireParentRead(dependencies, request); sendJson(response, 200, { assets: dependencies.media.listPhotos() }); return true }
       if (method === 'POST') {
-        requireParentMutation(auth, request)
+        requireParentMutation(dependencies, request)
         const asset = await dependencies.media.upload({ bytes: await readBinaryBody(request), contentType: readHeader(request, 'content-type'), originalName: readHeader(request, 'x-osl-file-name'), kind: 'photo' })
         sendJson(response, 201, asset)
         return true
@@ -175,16 +181,16 @@ export async function handleApiRequest(request: IncomingMessage, response: Serve
     if (parentPhotoMatch !== null) {
       if (dependencies.media === undefined) throw new ApiRequestError(503, 'service_unavailable', 'Photo media is unavailable')
       const id = decodeURIComponent(parentPhotoMatch[1]); const content = parentPhotoMatch[2]
-      if (content === 'content' && method === 'GET') { requireParentRead(auth, request); return sendMedia(response, dependencies.media.file(id)) }
-      if (content === undefined && method === 'DELETE') { requireParentMutation(auth, request); await dependencies.media.remove(id); response.writeHead(204); response.end(); return true }
+      if (content === 'content' && method === 'GET') { requireParentRead(dependencies, request); return sendMedia(response, dependencies.media.file(id)) }
+      if (content === undefined && method === 'DELETE') { requireParentMutation(dependencies, request); await dependencies.media.remove(id); response.writeHead(204); response.end(); return true }
       throw new ApiRequestError(405, 'method_not_allowed', `Method ${method} is not allowed`)
     }
     const parentMediaMatch = /^\/api\/v1\/media\/celebrations\/([^/]+)(?:\/(content))?$/.exec(path)
     if (parentMediaMatch !== null) {
       if (dependencies.media === undefined) throw new ApiRequestError(503, 'service_unavailable', 'Celebration media is unavailable')
       const id = decodeURIComponent(parentMediaMatch[1]); const content = parentMediaMatch[2]
-      if (content === 'content' && method === 'GET') { requireParentRead(auth, request); return sendMedia(response, dependencies.media.file(id)) }
-      if (content === undefined && method === 'DELETE') { requireParentMutation(auth, request); await dependencies.media.remove(id); response.writeHead(204); response.end(); return true }
+      if (content === 'content' && method === 'GET') { requireParentRead(dependencies, request); return sendMedia(response, dependencies.media.file(id)) }
+      if (content === undefined && method === 'DELETE') { requireParentMutation(dependencies, request); await dependencies.media.remove(id); response.writeHead(204); response.end(); return true }
       throw new ApiRequestError(405, 'method_not_allowed', `Method ${method} is not allowed`)
     }
     const displayMediaMatch = /^\/api\/v1\/display\/media\/([^/]+)$/.exec(path)
@@ -200,12 +206,12 @@ export async function handleApiRequest(request: IncomingMessage, response: Serve
       if (dependencies.people === undefined) throw new ApiRequestError(503, 'service_unavailable', 'People service is unavailable')
       const id = decodeURIComponent(personMatch[1])
       if (method === 'PATCH') {
-        requireParentMutation(auth, request)
+        requireParentMutation(dependencies, request)
         sendJson(response, 200, dependencies.people.update({ id, ...await readJsonBody(request, updatePersonRequestSchema) }))
         return true
       }
       if (method === 'DELETE') {
-        requireParentMutation(auth, request)
+        requireParentMutation(dependencies, request)
         dependencies.people.remove(id)
         response.writeHead(204)
         response.end()
@@ -216,13 +222,13 @@ export async function handleApiRequest(request: IncomingMessage, response: Serve
 
     if (path === '/api/v1/chores') {
       if (dependencies.chores === undefined) throw new ApiRequestError(503, 'service_unavailable', 'Chore service is unavailable')
-      if (method === 'GET') { requireParentRead(auth, request); sendJson(response, 200, { chores: dependencies.chores.listChores() }); return true }
-      if (method === 'POST') { requireParentMutation(auth, request); const id = dependencies.chores.createChore(await readJsonBody(request, createChoreRequestSchema)); sendJson(response, 201, dependencies.chores.listChores().find((chore) => chore.id === id)!); return true }
+      if (method === 'GET') { requireParentRead(dependencies, request); sendJson(response, 200, { chores: dependencies.chores.listChores() }); return true }
+      if (method === 'POST') { requireParentMutation(dependencies, request); const id = dependencies.chores.createChore(await readJsonBody(request, createChoreRequestSchema)); sendJson(response, 201, dependencies.chores.listChores().find((chore) => chore.id === id)!); return true }
       throw new ApiRequestError(405, 'method_not_allowed', `Method ${method} is not allowed`)
     }
     if (path === '/api/v1/icons/search') {
       if (method !== 'GET') throw new ApiRequestError(405, 'method_not_allowed', `Method ${method} is not allowed`)
-      requireParentRead(auth, request)
+      requireParentRead(dependencies, request)
       if (dependencies.icons === undefined) throw new ApiRequestError(503, 'service_unavailable', 'Online icon search is unavailable')
       const query = url.searchParams.get('query')?.trim() ?? ''
       if (query.length < 2 || query.length > 80) throw new ApiRequestError(400, 'bad_request', 'Enter at least two characters to search icons')
@@ -231,7 +237,7 @@ export async function handleApiRequest(request: IncomingMessage, response: Serve
     }
     if (path === '/api/v1/icons/import') {
       if (method !== 'POST') throw new ApiRequestError(405, 'method_not_allowed', `Method ${method} is not allowed`)
-      requireParentMutation(auth, request)
+      requireParentMutation(dependencies, request)
       if (dependencies.icons === undefined) throw new ApiRequestError(503, 'service_unavailable', 'Online icon search is unavailable')
       const { name, color } = await readJsonBody(request, z.object({ name: z.string().min(1).max(140), color: z.string().regex(/^#[0-9a-fA-F]{6}$/).optional() }).strict())
       try { sendJson(response, 200, { icon: await dependencies.icons.import(name, color) }) } catch { throw new ApiRequestError(400, 'bad_request', 'That icon could not be imported') }
@@ -241,14 +247,14 @@ export async function handleApiRequest(request: IncomingMessage, response: Serve
     if (choreMatch !== null) {
       if (dependencies.chores === undefined) throw new ApiRequestError(503, 'service_unavailable', 'Chore service is unavailable')
       const id = decodeURIComponent(choreMatch[1])
-      if (method === 'PATCH') { requireParentMutation(auth, request); sendJson(response, 200, dependencies.chores.updateChore({ id, ...await readJsonBody(request, updateChoreRequestSchema) })); return true }
-      if (method === 'DELETE') { requireParentMutation(auth, request); dependencies.chores.archiveChore(id); response.writeHead(204); response.end(); return true }
+      if (method === 'PATCH') { requireParentMutation(dependencies, request); sendJson(response, 200, dependencies.chores.updateChore({ id, ...await readJsonBody(request, updateChoreRequestSchema) })); return true }
+      if (method === 'DELETE') { requireParentMutation(dependencies, request); dependencies.chores.archiveChore(id); response.writeHead(204); response.end(); return true }
       throw new ApiRequestError(405, 'method_not_allowed', `Method ${method} is not allowed`)
     }
     const correctionMatch = /^\/api\/v1\/chores\/([^/]+)\/completion$/.exec(path)
     if (correctionMatch !== null) {
       if (dependencies.chores === undefined) throw new ApiRequestError(503, 'service_unavailable', 'Chore service is unavailable')
-      requireParentMutation(auth, request)
+      requireParentMutation(dependencies, request)
       const { dueDate } = await readJsonBody(request, choreCorrectionRequestSchema)
       const command = { choreId: decodeURIComponent(correctionMatch[1]), dueDate, actor: 'parent' as const }
       sendJson(response, 200, method === 'POST' ? dependencies.chores.complete(command) : method === 'DELETE' ? dependencies.chores.undo(command) : (() => { throw new ApiRequestError(405, 'method_not_allowed', `Method ${method} is not allowed`) })())
@@ -257,7 +263,7 @@ export async function handleApiRequest(request: IncomingMessage, response: Serve
     if (path === '/api/v1/stars/adjustments') {
       if (dependencies.chores === undefined) throw new ApiRequestError(503, 'service_unavailable', 'Chore service is unavailable')
       if (method !== 'POST') throw new ApiRequestError(405, 'method_not_allowed', `Method ${method} is not allowed`)
-      requireParentMutation(auth, request)
+      requireParentMutation(dependencies, request)
       const input = await readJsonBody(request, starAdjustmentRequestSchema)
       const balance = dependencies.chores.adjustStars(input)
       // A manual adjustment changes the same display balances as a chore. Let
@@ -269,36 +275,36 @@ export async function handleApiRequest(request: IncomingMessage, response: Serve
     }
     if (path === '/api/v1/rewards') {
       if (dependencies.chores === undefined) throw new ApiRequestError(503, 'service_unavailable', 'Reward service is unavailable')
-      if (method === 'GET') { requireParentRead(auth, request); sendJson(response, 200, { rewards: dependencies.chores.listRewards() }); return true }
-      if (method === 'POST') { requireParentMutation(auth, request); const id = dependencies.chores.createReward(await readJsonBody(request, createRewardRequestSchema)); sendJson(response, 201, dependencies.chores.listRewards().find((reward) => reward.id === id)!); return true }
+      if (method === 'GET') { requireParentRead(dependencies, request); sendJson(response, 200, { rewards: dependencies.chores.listRewards() }); return true }
+      if (method === 'POST') { requireParentMutation(dependencies, request); const id = dependencies.chores.createReward(await readJsonBody(request, createRewardRequestSchema)); sendJson(response, 201, dependencies.chores.listRewards().find((reward) => reward.id === id)!); return true }
       throw new ApiRequestError(405, 'method_not_allowed', `Method ${method} is not allowed`)
     }
     const rewardMatch = /^\/api\/v1\/rewards\/([^/]+)(?:\/(redeem))?$/.exec(path)
     if (rewardMatch !== null) {
       if (dependencies.chores === undefined) throw new ApiRequestError(503, 'service_unavailable', 'Reward service is unavailable')
       const id = decodeURIComponent(rewardMatch[1]); const action = rewardMatch[2]
-      if (action === 'redeem' && method === 'POST') { requireParentMutation(auth, request); const { personId } = await readJsonBody(request, redeemRewardRequestSchema); sendJson(response, 201, { id: dependencies.chores.redeem(id, personId) }); return true }
-      if (!action && method === 'PATCH') { requireParentMutation(auth, request); sendJson(response, 200, dependencies.chores.updateReward({ id, ...await readJsonBody(request, updateRewardRequestSchema) })); return true }
-      if (!action && method === 'DELETE') { requireParentMutation(auth, request); dependencies.chores.archiveReward(id); response.writeHead(204); response.end(); return true }
+      if (action === 'redeem' && method === 'POST') { requireParentMutation(dependencies, request); const { personId } = await readJsonBody(request, redeemRewardRequestSchema); sendJson(response, 201, { id: dependencies.chores.redeem(id, personId) }); return true }
+      if (!action && method === 'PATCH') { requireParentMutation(dependencies, request); sendJson(response, 200, dependencies.chores.updateReward({ id, ...await readJsonBody(request, updateRewardRequestSchema) })); return true }
+      if (!action && method === 'DELETE') { requireParentMutation(dependencies, request); dependencies.chores.archiveReward(id); response.writeHead(204); response.end(); return true }
       throw new ApiRequestError(405, 'method_not_allowed', `Method ${method} is not allowed`)
     }
     if (path === '/api/v1/reward-redemptions') {
       if (dependencies.chores === undefined) throw new ApiRequestError(503, 'service_unavailable', 'Reward service is unavailable')
       if (method !== 'GET') throw new ApiRequestError(405, 'method_not_allowed', `Method ${method} is not allowed`)
-      requireParentRead(auth, request); sendJson(response, 200, { redemptions: dependencies.chores.listRedemptions() }); return true
+      requireParentRead(dependencies, request); sendJson(response, 200, { redemptions: dependencies.chores.listRedemptions() }); return true
     }
     const grantMatch = /^\/api\/v1\/reward-redemptions\/([^/]+)\/grant$/.exec(path)
     if (grantMatch !== null) {
       if (dependencies.chores === undefined) throw new ApiRequestError(503, 'service_unavailable', 'Reward service is unavailable')
       if (method !== 'POST') throw new ApiRequestError(405, 'method_not_allowed', `Method ${method} is not allowed`)
-      requireParentMutation(auth, request); dependencies.chores.grantRedemption(decodeURIComponent(grantMatch[1])); response.writeHead(204); response.end(); return true
+      requireParentMutation(dependencies, request); dependencies.chores.grantRedemption(decodeURIComponent(grantMatch[1])); response.writeHead(204); response.end(); return true
     }
 
     if (path === '/api/v1/lists') {
       if (dependencies.lists === undefined) throw new ApiRequestError(503, 'service_unavailable', 'List service is unavailable')
-      if (method === 'GET') { requireParentRead(auth, request); sendJson(response, 200, { lists: dependencies.lists.queries.getAll() }); return true }
+      if (method === 'GET') { requireParentRead(dependencies, request); sendJson(response, 200, { lists: dependencies.lists.queries.getAll() }); return true }
       if (method === 'POST') {
-        requireParentMutation(auth, request)
+        requireParentMutation(dependencies, request)
         const list = dependencies.lists.parentCommands.create(await readJsonBody(request, createListRequestSchema))
         publishInvalidation(dependencies, ['lists'])
         sendJson(response, 201, list)
@@ -311,14 +317,14 @@ export async function handleApiRequest(request: IncomingMessage, response: Serve
       if (dependencies.lists === undefined) throw new ApiRequestError(503, 'service_unavailable', 'List service is unavailable')
       const listId = decodeURIComponent(listItemsMatch[1]); const action = listItemsMatch[2]
       if (action === undefined && method === 'POST') {
-        requireParentMutation(auth, request)
+        requireParentMutation(dependencies, request)
         const item = dependencies.lists.parentCommands.addItem(listId, (await readJsonBody(request, addListItemRequestSchema)).text)
         publishInvalidation(dependencies, ['lists'])
         sendJson(response, 201, item)
         return true
       }
       if (action === 'checked' && method === 'DELETE') {
-        requireParentMutation(auth, request); dependencies.lists.parentCommands.clearChecked(listId); publishInvalidation(dependencies, ['lists']); response.writeHead(204); response.end(); return true
+        requireParentMutation(dependencies, request); dependencies.lists.parentCommands.clearChecked(listId); publishInvalidation(dependencies, ['lists']); response.writeHead(204); response.end(); return true
       }
       throw new ApiRequestError(405, 'method_not_allowed', `Method ${method} is not allowed`)
     }
@@ -326,23 +332,23 @@ export async function handleApiRequest(request: IncomingMessage, response: Serve
     if (listMatch !== null) {
       if (dependencies.lists === undefined) throw new ApiRequestError(503, 'service_unavailable', 'List service is unavailable')
       const id = decodeURIComponent(listMatch[1])
-      if (method === 'PATCH') { requireParentMutation(auth, request); const list = dependencies.lists.parentCommands.update({ id, ...await readJsonBody(request, updateListRequestSchema) }); publishInvalidation(dependencies, ['lists']); sendJson(response, 200, list); return true }
-      if (method === 'DELETE') { requireParentMutation(auth, request); dependencies.lists.parentCommands.remove(id); publishInvalidation(dependencies, ['lists']); response.writeHead(204); response.end(); return true }
+      if (method === 'PATCH') { requireParentMutation(dependencies, request); const list = dependencies.lists.parentCommands.update({ id, ...await readJsonBody(request, updateListRequestSchema) }); publishInvalidation(dependencies, ['lists']); sendJson(response, 200, list); return true }
+      if (method === 'DELETE') { requireParentMutation(dependencies, request); dependencies.lists.parentCommands.remove(id); publishInvalidation(dependencies, ['lists']); response.writeHead(204); response.end(); return true }
       throw new ApiRequestError(405, 'method_not_allowed', `Method ${method} is not allowed`)
     }
     const listItemMatch = /^\/api\/v1\/list-items\/([^/]+)(?:\/(toggle))?$/.exec(path)
     if (listItemMatch !== null) {
       if (dependencies.lists === undefined) throw new ApiRequestError(503, 'service_unavailable', 'List service is unavailable')
       const id = decodeURIComponent(listItemMatch[1]); const action = listItemMatch[2]
-      if (action === 'toggle' && method === 'POST') { requireParentMutation(auth, request); dependencies.lists.parentCommands.toggleItem(id); publishInvalidation(dependencies, ['lists']); response.writeHead(204); response.end(); return true }
-      if (action === undefined && method === 'DELETE') { requireParentMutation(auth, request); dependencies.lists.parentCommands.removeItem(id); publishInvalidation(dependencies, ['lists']); response.writeHead(204); response.end(); return true }
+      if (action === 'toggle' && method === 'POST') { requireParentMutation(dependencies, request); dependencies.lists.parentCommands.toggleItem(id); publishInvalidation(dependencies, ['lists']); response.writeHead(204); response.end(); return true }
+      if (action === undefined && method === 'DELETE') { requireParentMutation(dependencies, request); dependencies.lists.parentCommands.removeItem(id); publishInvalidation(dependencies, ['lists']); response.writeHead(204); response.end(); return true }
       throw new ApiRequestError(405, 'method_not_allowed', `Method ${method} is not allowed`)
     }
 
     if (path === '/api/v1/meals') {
       if (dependencies.meals === undefined) throw new ApiRequestError(503, 'service_unavailable', 'Meal service is unavailable')
       if (method !== 'GET') throw new ApiRequestError(405, 'method_not_allowed', `Method ${method} is not allowed`)
-      requireParentRead(auth, request)
+      requireParentRead(dependencies, request)
       const { start, end } = validateApiInput(Object.fromEntries(url.searchParams), mealRangeRequestSchema)
       sendJson(response, 200, { meals: dependencies.meals.queries.getRange(start, end) })
       return true
@@ -350,19 +356,19 @@ export async function handleApiRequest(request: IncomingMessage, response: Serve
     if (path === '/api/v1/meal-templates') {
       if (dependencies.meals === undefined) throw new ApiRequestError(503, 'service_unavailable', 'Meal service is unavailable')
       if (method !== 'GET') throw new ApiRequestError(405, 'method_not_allowed', `Method ${method} is not allowed`)
-      requireParentRead(auth, request); sendJson(response, 200, { templates: dependencies.meals.queries.getTemplates() }); return true
+      requireParentRead(dependencies, request); sendJson(response, 200, { templates: dependencies.meals.queries.getTemplates() }); return true
     }
     const mealTemplateMatch = /^\/api\/v1\/meal-templates\/([1-7])\/(breakfast|lunch|dinner)$/.exec(path)
     if (mealTemplateMatch !== null) {
       if (dependencies.meals === undefined) throw new ApiRequestError(503, 'service_unavailable', 'Meal service is unavailable')
       if (method !== 'PUT') throw new ApiRequestError(405, 'method_not_allowed', `Method ${method} is not allowed`)
-      requireParentMutation(auth, request); dependencies.meals.parentCommands.setTemplate(Number(mealTemplateMatch[1]), mealSlotKindSchema.parse(mealTemplateMatch[2]), (await readJsonBody(request, setMealTemplateRequestSchema)).text); response.writeHead(204); response.end(); return true
+      requireParentMutation(dependencies, request); dependencies.meals.parentCommands.setTemplate(Number(mealTemplateMatch[1]), mealSlotKindSchema.parse(mealTemplateMatch[2]), (await readJsonBody(request, setMealTemplateRequestSchema)).text); response.writeHead(204); response.end(); return true
     }
     const mealMatch = /^\/api\/v1\/meals\/(\d{4}-\d{2}-\d{2})\/(breakfast|lunch|dinner)$/.exec(path)
     if (mealMatch !== null) {
       if (dependencies.meals === undefined) throw new ApiRequestError(503, 'service_unavailable', 'Meal service is unavailable')
       if (method !== 'PUT') throw new ApiRequestError(405, 'method_not_allowed', `Method ${method} is not allowed`)
-      requireParentMutation(auth, request)
+      requireParentMutation(dependencies, request)
       const date = mealMatch[1]; const slot = mealSlotKindSchema.parse(mealMatch[2]); const { text } = await readJsonBody(request, setMealRequestSchema)
       dependencies.meals.parentCommands.set(date, slot, text)
       publishInvalidation(dependencies, ['meals'])
@@ -371,9 +377,9 @@ export async function handleApiRequest(request: IncomingMessage, response: Serve
 
     if (path === '/api/v1/calendar-sources') {
       const sources = requireSources(dependencies)
-      if (method === 'GET') { requireParentRead(auth, request); sendJson(response, 200, { sources: sources.list() }); return true }
+      if (method === 'GET') { requireParentRead(dependencies, request); sendJson(response, 200, { sources: sources.list() }); return true }
       if (method === 'POST') {
-        requireParentMutation(auth, request)
+        requireParentMutation(dependencies, request)
         const input = await readJsonBody(request, connectCalendarSourceRequestSchema)
         const source = input.kind === 'ics'
           ? await sources.connectIcs({ name: input.name, url: input.url })
@@ -387,7 +393,7 @@ export async function handleApiRequest(request: IncomingMessage, response: Serve
 
     if (path === '/api/v1/calendar-sources/sync') {
       if (method !== 'POST') throw new ApiRequestError(405, 'method_not_allowed', `Method ${method} is not allowed`)
-      requireParentMutation(auth, request)
+      requireParentMutation(dependencies, request)
       const sources = requireSources(dependencies)
       if (dependencies.syncScheduler === undefined) { void sources.syncAll() } else { void dependencies.syncScheduler.syncNow() }
       response.writeHead(202); response.end(); return true
@@ -399,7 +405,7 @@ export async function handleApiRequest(request: IncomingMessage, response: Serve
       const sourceId = decodeURIComponent(sourceMatch[1])
       const calendars = sourceMatch[2] === 'calendars'
       if (calendars && method === 'GET') {
-        requireParentRead(auth, request)
+        requireParentRead(dependencies, request)
         const discovered = await sources.discoverCollections(sourceId)
         sendJson(response, 200, {
           calendars: discovered.map((collection) => ({
@@ -410,7 +416,7 @@ export async function handleApiRequest(request: IncomingMessage, response: Serve
         return true
       }
       if (calendars && method === 'PUT') {
-        requireParentMutation(auth, request)
+        requireParentMutation(dependencies, request)
         const input = await readJsonBody(request, setCalendarSelectionRequestSchema)
         sources.setCalendarSelection({
           sourceId, url: input.calendar.id, name: input.calendar.name, color: input.calendar.color,
@@ -421,7 +427,7 @@ export async function handleApiRequest(request: IncomingMessage, response: Serve
         response.writeHead(204); response.end(); return true
       }
       if (!calendars && method === 'DELETE') {
-        requireParentMutation(auth, request)
+        requireParentMutation(dependencies, request)
         sources.remove(sourceId)
         publishInvalidation(dependencies, ['events'])
         response.writeHead(204); response.end(); return true
@@ -431,13 +437,13 @@ export async function handleApiRequest(request: IncomingMessage, response: Serve
 
     if (path === '/api/v1/displays') {
       if (method === 'GET') {
-        requireParentRead(auth, request)
+        requireParentRead(dependencies, request)
         if (displays === undefined) throw new ApiRequestError(503, 'service_unavailable', 'Display service is unavailable')
         sendJson(response, 200, { displays: displays.list() })
         return true
       }
       if (method === 'POST') {
-        requireParentMutation(auth, request)
+        requireParentMutation(dependencies, request)
         if (displays === undefined) throw new ApiRequestError(503, 'service_unavailable', 'Display service is unavailable')
         const input = await readJsonBody(request, registerDisplayRequestSchema)
         // The credential is intentionally present only in this parent-approved response.
@@ -452,7 +458,7 @@ export async function handleApiRequest(request: IncomingMessage, response: Serve
       const [, displayId, action] = displayMatch
       if (action === 'revoke') {
         if (method !== 'POST') throw new ApiRequestError(405, 'method_not_allowed', `Method ${method} is not allowed`)
-        requireParentMutation(auth, request)
+        requireParentMutation(dependencies, request)
         if (displays === undefined) throw new ApiRequestError(503, 'service_unavailable', 'Display service is unavailable')
         displays.revoke(displayId)
         response.writeHead(204)
@@ -460,9 +466,49 @@ export async function handleApiRequest(request: IncomingMessage, response: Serve
         return true
       }
       if (method !== 'PATCH') throw new ApiRequestError(405, 'method_not_allowed', `Method ${method} is not allowed`)
-      requireParentMutation(auth, request)
+      requireParentMutation(dependencies, request)
       if (displays === undefined) throw new ApiRequestError(503, 'service_unavailable', 'Display service is unavailable')
       sendJson(response, 200, displays.update(displayId, await readJsonBody(request, updateDisplayRequestSchema)))
+      return true
+    }
+
+    if (path === '/api/v1/parent-devices') {
+      if (method === 'POST') {
+        if (auth === undefined) throw new ApiRequestError(503, 'service_unavailable', 'Authentication service is unavailable')
+        const parentDevices = requireParentDevices(dependencies)
+        // No cookie and no origin check: the caller pairing a phone is by
+        // definition at a foreign origin with no session yet. The household
+        // PIN is the parent authorisation, and it is checked through the
+        // ordinary login path so a wrong PIN feeds the same failure counter
+        // and backoff the PIN screen uses — a parent-level credential must not
+        // be a cheaper brute-force target than the PIN itself. The session
+        // that check mints is discarded immediately; pairing issues a bearer
+        // credential, never a browser session.
+        assertJsonContentType(request)
+        const { pin, name } = await readJsonBody(request, pairParentDeviceRequestSchema)
+        const session = auth.login(pin)
+        auth.logout(session.sessionToken)
+        // The credential is intentionally present only in this response.
+        sendJson(response, 201, parentDevices.pair({ name }))
+        return true
+      }
+      if (method === 'GET') {
+        requireParentRead(dependencies, request)
+        sendJson(response, 200, { parentDevices: requireParentDevices(dependencies).list() })
+        return true
+      }
+      throw new ApiRequestError(405, 'method_not_allowed', `Method ${method} is not allowed`)
+    }
+
+    const parentDeviceRevokeMatch = /^\/api\/v1\/parent-devices\/([^/]+)\/revoke$/.exec(path)
+    if (parentDeviceRevokeMatch !== null) {
+      if (method !== 'POST') throw new ApiRequestError(405, 'method_not_allowed', `Method ${method} is not allowed`)
+      // Deliberately reachable over the bearer path too: a parent whose phone
+      // is lost has only their other phone to kill it from.
+      requireParentMutation(dependencies, request)
+      requireParentDevices(dependencies).revoke(decodeURIComponent(parentDeviceRevokeMatch[1]))
+      response.writeHead(204)
+      response.end()
       return true
     }
 
@@ -723,6 +769,25 @@ function readCookie(request: IncomingMessage, name: string): string | undefined 
   return header.split(';').map((part) => part.trim()).find((part) => part.startsWith(`${name}=`))?.slice(name.length + 1)
 }
 
+/**
+ * The one route that is deliberately reachable cross-origin and needs no header
+ * a hostile page cannot set. That combination would otherwise make it a
+ * CORS-*simple* request — sendable without a preflight — and every wrong PIN it
+ * carries feeds the household-wide backoff, so any page a parent happened to
+ * visit could lock them out of their own PIN screen for fifteen minutes.
+ *
+ * Demanding JSON closes that: `application/json` is not a simple content type,
+ * so a browser must preflight, and the preflight fails for want of any CORS
+ * response header. A real client sends this already; only the forged request
+ * notices.
+ */
+function assertJsonContentType(request: IncomingMessage): void {
+  const contentType = readHeader(request, 'content-type')?.split(';')[0].trim().toLowerCase()
+  if (contentType !== 'application/json') {
+    throw new ApiRequestError(415, 'bad_request', 'This endpoint requires a Content-Type of application/json')
+  }
+}
+
 function assertSameOrigin(request: IncomingMessage): void {
   const origin = readHeader(request, 'origin')
   const host = readHeader(request, 'host')
@@ -731,14 +796,46 @@ function assertSameOrigin(request: IncomingMessage): void {
   if (origin !== `${protocol}://${host}`) throw new AuthError(403, 'forbidden', 'Request origin is not allowed')
 }
 
-function requireParentRead(auth: HouseholdAuthService | undefined, request: IncomingMessage): void {
+/**
+ * Decides a parent request that arrives with an `Authorization` header, and
+ * returns false only when there is no such header, leaving the browser path to
+ * run unchanged. When the header is present this is the *exclusive* decision:
+ * a failed bearer never falls back to the cookie, so a stale session cookie
+ * riding along cannot rescue a revoked or forged token.
+ *
+ * The bearer branch deliberately runs neither the CSRF check nor
+ * `assertSameOrigin`, and that is not a relaxation. Both exist to defend an
+ * *ambient* credential: the browser attaches the session cookie to whatever
+ * request a hostile page provokes, so the server demands proof the caller
+ * meant it. A bearer token is not ambient — no browser attaches it on a
+ * foreign page's behalf, because only the paired app holds it. There is
+ * nothing here for CSRF or an origin check to defend, and requiring them would
+ * simply lock out the cross-origin app this path exists to serve.
+ */
+function decidedByParentBearer(dependencies: ApiRouterDependencies, request: IncomingMessage): boolean {
+  if (readHeader(request, 'authorization') === undefined) return false
+  // Without a parent registry there is no bearer credential to accept, so the
+  // request falls through to exactly the checks it faced before this path.
+  const parentDevices = dependencies.parentDevices
+  if (parentDevices === undefined) return false
+  if (parentDevices.authenticate(readBearerToken(request)) === undefined) {
+    throw new AuthError(401, 'unauthorized', 'A paired parent credential is required')
+  }
+  return true
+}
+
+function requireParentRead(dependencies: ApiRouterDependencies, request: IncomingMessage): void {
+  if (decidedByParentBearer(dependencies, request)) return
+  const auth = dependencies.auth
   if (auth === undefined || auth.getParentSession(readCookie(request, PARENT_SESSION_COOKIE)) === undefined) {
     throw new AuthError(401, 'unauthorized', 'Parent session is required')
   }
 }
 
-function requireParentMutation(auth: HouseholdAuthService | undefined, request: IncomingMessage): void {
+function requireParentMutation(dependencies: ApiRouterDependencies, request: IncomingMessage): void {
+  if (decidedByParentBearer(dependencies, request)) return
   assertSameOrigin(request)
+  const auth = dependencies.auth
   if (auth === undefined) throw new ApiRequestError(503, 'service_unavailable', 'Authentication service is unavailable')
   auth.requireParentMutation(readCookie(request, PARENT_SESSION_COOKIE), readHeader(request, CSRF_HEADER))
 }

@@ -1,6 +1,6 @@
 import { useEffect, useState, type FormEvent } from 'react'
-import type { DisplayDevice, RegisteredDisplay, SyncStatus } from '@shared/api/contract'
-import { ApiError, parentGet, parentMutation } from '../api/client'
+import type { DisplayDevice, ParentDeviceDto, RegisteredDisplay, SyncStatus } from '@shared/api/contract'
+import { ApiError, listParentDevices, parentGet, parentMutation, revokeParentDevice } from '../api/client'
 import { Card, EmptyNote, GhostButton, PrimaryButton, TextInput } from '../components/ui'
 import { DEFAULT_HOME_LAYOUT, findFreeSpot, sanitizeLayout, TILE_SPECS } from '@shared/home'
 import type { HomeTile, HomeTileType } from '@shared/types'
@@ -28,8 +28,39 @@ export function DisplaysDiagnosticsPage() {
       {adding && <RegisterDisplay onDone={async () => { setAdding(false); await load() }} onCancel={() => setAdding(false)} />}
       {displays.length === 0 && !adding ? <EmptyNote>No displays are registered yet.</EmptyNote> : displays.map((display) => <DisplayCard key={display.id} display={display} onChanged={load} />)}
     </section>
+    <ParentPhones />
     <Diagnostics sync={sync} onRefresh={load} />
   </div>
+}
+
+/** Paired phones are listed and revoked here, never created here: a phone pairs
+ * itself by scanning a screen and proving the household PIN (ADR 0006), so this
+ * surface exists purely so a lost phone can be killed from another device. */
+function ParentPhones() {
+  const [phones, setPhones] = useState<ParentDeviceDto[]>([])
+  const [error, setError] = useState<string | null>(null)
+  const load = async () => {
+    try {
+      const result = await listParentDevices()
+      setPhones(result.parentDevices); setError(null)
+    } catch (reason) { setError(message(reason)) }
+  }
+  useEffect(() => { void load() }, [])
+  return <section aria-labelledby="parent-phones-heading"><div className="mb-2"><h3 id="parent-phones-heading" className="font-display text-xl font-semibold">Parent phones</h3><p className="text-sm font-semibold text-ink-faint">Phones add themselves: scan a screen with the OpenSkyLight app and enter the household PIN. Revoke one here if it is lost or should no longer administer the household.</p></div>
+    {error && <ErrorNote>{error}</ErrorNote>}
+    {phones.length === 0 && error === null ? <EmptyNote>No phones are paired yet.</EmptyNote> : phones.map((phone) => <ParentPhoneCard key={phone.id} phone={phone} onChanged={load} />)}
+  </section>
+}
+
+function ParentPhoneCard({ phone, onChanged }: { phone: ParentDeviceDto; onChanged: () => Promise<void> }) {
+  const [confirmingRevoke, setConfirmingRevoke] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const [busy, setBusy] = useState(false)
+  const revoke = async () => { if (busy) return; setBusy(true); setError(null); try { await revokeParentDevice(phone.id); setConfirmingRevoke(false); await onChanged() } catch (reason) { setError(message(reason)) } finally { setBusy(false) } }
+  return <Card className="mb-3"><div className="flex items-start gap-3"><span className={`mt-1 h-3 w-3 shrink-0 rounded-full ${phone.revokedAt ? 'bg-red-500' : phone.lastSeenAt ? 'bg-green-500' : 'bg-amber-500'}`} aria-hidden="true" /><div className="min-w-0 flex-1"><p className="font-display text-xl font-semibold">{phone.name}</p><p className="text-sm font-semibold text-ink-faint">{phone.revokedAt ? `Revoked ${formatTime(phone.revokedAt)}` : phone.lastSeenAt ? `Last seen ${formatTime(phone.lastSeenAt)}` : `Paired ${formatTime(phone.pairedAt)} — not used yet`}</p></div></div>
+    {error && <ErrorNote>{error}</ErrorNote>}
+    {!phone.revokedAt && (confirmingRevoke ? <div className="mt-3 rounded-xl bg-red-50 p-3"><p className="text-sm font-bold text-red-900">Revoke {phone.name}? It will immediately lose household access, and it can only get back in with the household PIN.</p><div className="mt-2 flex gap-2"><button type="button" className="pressable min-h-11 rounded-xl bg-red-700 px-4 font-extrabold text-white disabled:opacity-40" disabled={busy} onClick={() => void revoke()}>{busy ? 'Revoking…' : 'Revoke phone'}</button><GhostButton onClick={() => setConfirmingRevoke(false)}>Cancel</GhostButton></div></div> : <button type="button" className="mt-3 min-h-11 text-sm font-extrabold text-red-700" onClick={() => setConfirmingRevoke(true)}>Revoke this phone</button>)}
+  </Card>
 }
 
 function RegisterDisplay({ onDone, onCancel }: { onDone: () => Promise<void>; onCancel: () => void }) {

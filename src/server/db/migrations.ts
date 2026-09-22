@@ -302,6 +302,21 @@ const migrations: readonly string[] = [
     ALTER TABLE calendar_sources ADD COLUMN base_url TEXT;
     ALTER TABLE calendar_sources ADD COLUMN username TEXT;
     ALTER TABLE calendar_sources ADD COLUMN password_enc BLOB;
+  `,
+
+  // 010 - paired parent phones. Deliberately a separate table from devices:
+  // a parent credential is far more powerful than a display one, and keeping
+  // the two registries disjoint makes confusing them structurally impossible
+  // rather than something a test has to keep catching.
+  `
+    CREATE TABLE parent_devices (
+      id TEXT PRIMARY KEY,
+      name TEXT NOT NULL UNIQUE,
+      credential_hash BLOB NOT NULL UNIQUE,
+      paired_at TEXT NOT NULL,
+      last_seen_at TEXT,
+      revoked_at TEXT
+    );
   `
 ]
 

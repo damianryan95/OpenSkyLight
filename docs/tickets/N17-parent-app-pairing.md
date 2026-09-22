@@ -1,7 +1,57 @@
 # N17 - Parent app pairing and token authentication
 
-Status: ready
+Status: done
 Depends on: (none)
+
+**Verified 2026-09-22** against a running server on a scratch database, driven
+from `capacitor://localhost` with no cookie jar: every acceptance criterion
+below passes, including revocation failing closed on the very next request and
+both credential-confusion directions. The complete server log after a pairing,
+a wrong-PIN attempt, bearer reads and mutations, and a revocation is one line.
+
+**What is not proven:** no real app client exists yet, so the bearer path has
+never been exercised from an actual Capacitor webview — and per the native
+bridge section below, a naive webview `fetch` will not work. `N05`/`N18` own
+that. Treat this ticket as a verified server capability, not as a working app.
+
+## Amendment (2026-09-22): pairing is PIN-authenticated, not an `/admin/` mint
+
+The Deliverable below originally had a parent-authorised action in `/admin/`
+mint a credential shown exactly once. The project owner has since settled the
+pairing ceremony in [ADR 0006](../adr/0006-screen-initiated-pairing.md): the
+screen displays a QR, the phone scans it, and a phone authenticates with the
+**household PIN**.
+
+Pairing is therefore an API action — `POST /api/v1/parent-devices` with a PIN
+and a device name — rather than a screen in `/admin/`. The app never needs a
+secret handed to it out of band, and the route works from a foreign origin by
+construction, which is the whole point of this ticket.
+
+Everything else below stands, in particular the entire Security requirements
+and Acceptance sections. This ticket remains the authentication substrate;
+[`N18`](N18-screen-qr-enrolment.md) builds the ceremony on top of it.
+
+Two consequences worth stating: minting requires the PIN while a paired phone
+holds only a bearer credential, so a stolen phone cannot mint itself a spare —
+which is what makes revocation final. And `/admin/` keeps a list-and-revoke
+surface, because a lost phone has to be killable from a browser.
+
+## The app must use a native HTTP bridge, not the webview's `fetch`
+
+Found during review of this ticket, and it belongs to whoever builds the app
+(`N05`, `N18`) rather than to the server.
+
+The server sends **no `Access-Control-*` headers**, deliberately — adding them
+would hand back much of what `assertSameOrigin` buys the browser path. But a
+request carrying an `Authorization` header is never CORS-simple, so a webview
+`fetch` to the household server preflights, and that preflight has nothing to
+answer it. **The bearer path is therefore unreachable from an ordinary
+Capacitor webview `fetch`.**
+
+The fix is the one Capacitor already ships: route requests through the native
+HTTP layer (`CapacitorHttp`, which patches `window.fetch`), which is not
+subject to CORS at all. This is not a server change and must not become one.
+Discover it here rather than at integration time.
 
 ## Context
 
@@ -68,6 +118,25 @@ These are the reason this is its own ticket rather than a line in `N05`.
   client can initiate.
 - Rate-limit credential presentation the way the PIN endpoint should be
   (see `N07`), so a stolen device or a guessed token cannot be brute-forced.
+
+  **How this was satisfied, and the one deliberate exception.** *Minting* is
+  rate-limited: pairing checks the PIN through the ordinary login path, so a
+  wrong PIN feeds the same `auth_attempt_state` counter and backoff the PIN
+  screen uses. *Presentation* of an already-minted bearer credential is
+  deliberately **not** counted. The credential is 32 random bytes; an online
+  attacker gets no useful fraction of 2^256 at any request rate a counter would
+  change, so throttling would add lockout risk for a legitimate phone and buy
+  nothing. If the credential ever shrinks or becomes user-chosen, this stops
+  being true and the exception must go.
+
+  **A pairing request must carry `Content-Type: application/json`**, enforced
+  in `router.ts`. This looks like pedantry and is not: pairing is the one route
+  with no origin check and no required custom header, which would otherwise
+  make it a CORS-*simple* request that any page a parent visits can send
+  without a preflight. Four forged requests would then put the household-wide
+  PIN backoff into lockout. Demanding JSON forces a preflight that fails for
+  want of any CORS response header. This was found by review, reproduced
+  against a running server, and is covered by a test.
 - Do not weaken `assertSameOrigin` or change the cookie's `SameSite` to make
   this easier. Both were deliberate, and loosening them would degrade the
   browser path to serve the app path.

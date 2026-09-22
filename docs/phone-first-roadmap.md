@@ -114,6 +114,8 @@ barrier for the target user, and it gates the product's core feature.
 3. **Phase 2 — Phone-first onboarding**
    - `N02` First-boot network pairing *(written Pi-first; settle against the
      chosen device — see section 3a)*
+   - `N18` Screen-displayed QR enrolment and household claim *(ADR 0006; the
+     ceremony `N04` is entered through)*
    - `N04` Phone-first setup wizard
    - `O04` Release hardening *(already open, blocked on `O02` evidence)*
 
@@ -159,6 +161,8 @@ N13 --> N14 --+
 N13 --> N05 --+
 N17 --> N05
 
+N17 --> N18 --> N04
+
 O02 --> N02 --> N04 <-- N03
               |
 O02 --> O04 --+
@@ -177,14 +181,15 @@ O02 --> N12
 | N01 | Removed-functionality audit | done | — |
 | N13 | Retire the Google OAuth layer | done | — |
 | N14 | CalDAV and ICS calendar source | done | N13 |
-| N17 | Parent app pairing and token authentication | ready | — |
+| N17 | Parent app pairing and token authentication | done | — |
+| N18 | Screen-displayed QR enrolment and household claim | planned | N17 (ADR 0006 decided) |
 | N05 | Phone-native calendar connector | planned | N13, N17 (ADR 0005 decided) |
 | N06 | Bidirectional calendar sync | planned | N05, N14 |
 | N15 | On-screen calendar editing | planned | N06 |
 | N16 | Install experience for a non-technical household | planned | — (ADR 0004 decided) |
 | N02 | Pi first-boot Wi-Fi AP pairing | planned | O02 |
 | N03 | Local network name for the server | planned | S06, O03 |
-| N04 | Phone-first setup wizard | planned | N02, N03, P01 |
+| N04 | Phone-first setup wizard | planned | N02, N03, P01, N18 |
 | N07 | Self-hosted remote access via WireGuard | planned | N03, N04 |
 | N08 | Local USB backup target | planned | O03 |
 | N09 | Personal cloud backup target | planned | N08 |

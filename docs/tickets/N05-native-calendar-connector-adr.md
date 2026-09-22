@@ -95,6 +95,16 @@ Carved out as [`N17`](N17-parent-app-pairing.md) — app pairing and token
 authentication for a non-same-origin parent client — and must land first. This
 ticket then builds on a client that can actually talk to the server.
 
+### Carried forward from `N17` (2026-09-22)
+
+`N17` landed the bearer path, and surfaced one constraint this ticket owns:
+**the app must talk to the server through Capacitor's native HTTP layer, not
+the webview's own `fetch`.** The server sends no CORS headers by design, and an
+`Authorization` header always triggers a preflight, so a plain webview `fetch`
+cannot use the credential at all. See `N17`'s section "The app must use a
+native HTTP bridge". Budget for it in plugin selection rather than meeting it
+at integration.
+
 ## Acceptance
 
 - A parent grants calendar permission on the phone and sees those events on

@@ -31,7 +31,13 @@ These depended on a desktop runtime and have no headless equivalent:
   OS/container runtime's job (`restart: unless-stopped`).
 - **QR-code phone pairing for the companion app** — the display served the
   companion itself on port 8420. Replaced by `/admin/` on the server, with
-  display enrolment links instead.
+  display enrolment links instead. **The QR is selected to return**, inverted,
+  as [`N18`](tickets/N18-screen-qr-enrolment.md): upstream's QR handed out the
+  app, whereas [ADR 0006](adr/0006-screen-initiated-pairing.md) has an
+  unregistered screen display an enrolment code for a parent's phone to scan.
+  The enrolment link this row credits as the replacement is the thing now being
+  retired — it could not be moved onto a keyboard-less wall display, which
+  `N16` records as a real deployment failure.
 
 ## 3. Present in the UI but non-functional — since fixed
 
