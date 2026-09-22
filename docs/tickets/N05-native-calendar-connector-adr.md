@@ -53,6 +53,49 @@ Likely files: companion app mobile layer (new), a push API route in
 `src/server/api/router.ts`, `src/shared/api/contract.ts`,
 `src/server/domain/eventFeeds.ts`, tests.
 
+## Blocker found while scoping (2026-09-22)
+
+**The parent authentication model is same-origin by construction and a
+Capacitor app is not same-origin.** This is a prerequisite, not a detail, and
+it must be solved before any calendar work begins.
+
+Three things all assume the client is served by the household server itself:
+
+- `assertSameOrigin` (`router.ts`) requires the `Origin` header to equal
+  `protocol://host` exactly. A Capacitor webview's origin is
+  `capacitor://localhost` or `http://localhost` and can never match, so login
+  and every mutation would return 403.
+- The parent session is an `HttpOnly; SameSite=Lax` cookie scoped to
+  `/api/v1`. `SameSite=Lax` is not sent cross-site, and `SameSite=None` would
+  require `Secure`, which a plain-HTTP LAN deployment does not have.
+- The companion's client calls relative paths (`/api/v1/...`) with
+  `credentials: 'same-origin'`, both of which resolve to the app bundle rather
+  than the server.
+
+All 56 parent routes go through `requireParentRead`/`requireParentMutation`,
+which read the cookie. None accepts a bearer token.
+
+### The options
+
+- **Pair the app with a bearer credential**, exactly as displays already do
+  (`readBearerToken`, `displays.authenticate`). No ambient cookie means no
+  CSRF surface and no origin check needed on those requests. It reuses a
+  pattern already proven in this codebase, and the app becomes a first-class
+  client rather than a browser in a costume. **Recommended.**
+- **Load the server's own URL in the webview** (Capacitor's `server.url`).
+  Same-origin holds, cookies work, and plugins are still injected — much
+  cheaper. But the app renders nothing when the server is unreachable, which
+  is a poor experience away from home and awkward alongside `N07`.
+- **CORS with `SameSite=None`** — weakens the CSRF posture and demands HTTPS
+  the LAN does not have. Not recommended.
+
+### Suggested split
+
+This is its own piece of work and should not be smuggled into the calendar
+connector: **app pairing and token authentication for a non-same-origin parent
+client**, delivered first. The calendar connector then builds on a client that
+can actually talk to the server.
+
 ## Acceptance
 
 - A parent grants calendar permission on the phone and sees those events on
