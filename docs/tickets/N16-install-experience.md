@@ -1,7 +1,24 @@
 # N16 - Install experience for a non-technical household
 
 Status: planned
-Depends on: (none — the distribution decision is made)
+Depends on: the target device being chosen, and the application being
+feature-stable. **Deliberately last** — see the scheduling note below.
+
+## Scheduling (2026-09-22)
+
+The mechanism is settled by ADR 0004. The build is deliberately deferred to the
+back of the queue.
+
+An appliance image is constructed around a particular application running on
+particular hardware. Neither is settled: the app is still gaining features, and
+the device is open and unlikely to be a Raspberry Pi. Building the image before
+both are stable means building it twice, and the second build discards most of
+the first.
+
+Until then, Portainer and Compose remain the install path. That is acceptable
+precisely because the only current user is the person who wrote it — the
+moment anyone else installs this, that stops being true and this ticket becomes
+urgent.
 
 ## Context
 

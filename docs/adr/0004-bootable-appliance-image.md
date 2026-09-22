@@ -63,6 +63,16 @@ technical users. They stop being the only path.
   mini PC is the probable shape. The image must not hard-code Raspberry Pi
   assumptions, and `deployment/raspberry-pi/` remains one recipe among several.
 
+## Timing (recorded 2026-09-22)
+
+This decision stands; its implementation is deliberately scheduled last. An
+image is built around a specific application on specific hardware, and neither
+is settled yet. `N16` carries the reasoning and the conditions for starting.
+
+The decision is recorded now anyway because it shapes earlier work — chiefly
+that releases must publish pullable images rather than expecting the device to
+build them, which is already true of the release workflow.
+
 ## Follow-up
 
 `N16` implements this and owns the remaining choices: base OS, update

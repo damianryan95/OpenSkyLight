@@ -111,7 +111,8 @@ barrier for the target user, and it gates the product's core feature.
    - `N05` Phone-native calendar connector
 
 3. **Phase 2 — Phone-first onboarding**
-   - `N02` Raspberry Pi first-boot Wi-Fi access point pairing
+   - `N02` First-boot network pairing *(written Pi-first; settle against the
+     chosen device — see section 3a)*
    - `N04` Phone-first setup wizard
    - `O04` Release hardening *(already open, blocked on `O02` evidence)*
 
@@ -129,6 +130,19 @@ barrier for the target user, and it gates the product's core feature.
    - `N10` SD card photo storage (never backed up)
    - `N11` Device access hardening (developer-only access)
    - `N12` Power management (software + optional physical control)
+
+7. **Phase 6 — Shipping it** *(deliberately last, 2026-09-22)*
+   - `N16` Bootable appliance image, per
+     [ADR 0004](adr/0004-bootable-appliance-image.md)
+
+   The mechanism is decided; the timing is not now. An install image is built
+   around a specific application on specific hardware, and neither is settled
+   — the app is still gaining features and the device is still open. Building
+   it earlier means building it twice. It happens once the owner is satisfied
+   with both.
+
+   Until then Portainer and Compose remain the install path, which is
+   acceptable because the only current user is the person who wrote it.
 
 Running in parallel throughout, unaffected by this roadmap:
 - `PE05`, `PE06`, `PE07` (celebration media/admin/runtime) — in progress
