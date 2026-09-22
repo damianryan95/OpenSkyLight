@@ -155,8 +155,9 @@ Running in parallel throughout, unaffected by this roadmap:
 N01 (standalone)
 
 N13 --> N14 --+
-        |     +--> N06 --> N15
-N13 --> N17 --> N05 --+
+              +--> N06 --> N15
+N13 --> N05 --+
+N17 --> N05
 
 O02 --> N02 --> N04 <-- N03
               |
@@ -173,9 +174,9 @@ O02 --> N12
 
 | Ticket | Title | Status | Depends on |
 | --- | --- | --- | --- |
-| N01 | Removed-functionality audit | ready | — |
-| N13 | Retire the Google OAuth layer | ready | — |
-| N14 | CalDAV and ICS calendar source | planned | N13 |
+| N01 | Removed-functionality audit | done | — |
+| N13 | Retire the Google OAuth layer | done | — |
+| N14 | CalDAV and ICS calendar source | done | N13 |
 | N17 | Parent app pairing and token authentication | ready | — |
 | N05 | Phone-native calendar connector | planned | N13, N17 (ADR 0005 decided) |
 | N06 | Bidirectional calendar sync | planned | N05, N14 |

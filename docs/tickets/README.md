@@ -158,7 +158,8 @@ Product and technical direction: [`phone-first-roadmap.md`](../phone-first-roadm
 - [N16 - Install experience for a non-technical household](N16-install-experience.md)
 - [N17 - Parent app pairing and token authentication](N17-parent-app-pairing.md)
 
-N01 and N13 are ready. The calendar direction is set by
+`N01`, `N13` and `N14` are done; `N17` is the next ready ticket and gates
+`N05`. The calendar direction is set by
 [ADR 0002](../adr/0002-provider-agnostic-calendar-access.md), which supersedes
 ADR 0001 and removes the Google OAuth layer; the remote-access direction is set
 by [ADR 0003](../adr/0003-self-hosted-remote-access.md). Treat `G01`–`G05` as
