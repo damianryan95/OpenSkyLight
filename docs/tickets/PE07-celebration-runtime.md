@@ -1,6 +1,6 @@
 # PE07 - Build the chore celebration renderer
 
-Status: in progress  
+Status: done  
 Depends on: PE01, PE02, PE05
 
 ## Context
@@ -38,3 +38,31 @@ CSS, component/browser tests.
 
 Verify: queue/component tests, two-display browser journey, offline/corrupt-media
 journeys, reduced-motion test, and memory/resource cleanup assertions.
+
+Implementation note (2026-09-22): complete.
+
+The overflow summary was the substantive gap and it hid a defect: the queue
+capped the backlog at three and counted the remainder correctly, but the
+dismiss that emptied the queue discarded the count — which is exactly when the
+summary should appear. The count could therefore never be shown. Carried
+through that dismiss, given a `clearOverflow` action so it can retire itself,
+and rendered.
+
+The rest of the criteria were already satisfied and are now covered by tests
+rather than assumed:
+
+- Initiating-display routing is applied in `browser.ts` before an event ever
+  reaches the overlay.
+- Undo emits no domain event at all, and an idempotent repeat returns before
+  emitting one, so neither can celebrate. Both are now asserted against the
+  real service.
+- Missing or corrupt media falls back to the star card without touching the
+  committed completion; reduced motion skips the fetch entirely, so animation
+  bytes are never downloaded.
+- The overlay is pointer-transparent and time-bounded, and `min(50vw, 50vh)`
+  with `object-contain` keeps media inside a safe region at the wide-and-short
+  2400x900 viewport as well as the taller ones.
+
+Not done here: a two-display browser journey. It needs two enrolled displays
+against a running server and belongs with `O02`-style device validation rather
+than the unit suite.
