@@ -157,15 +157,26 @@ require an app password rather than your normal one.
 | iCloud | `https://caldav.icloud.com` |
 | Fastmail | `https://caldav.fastmail.com` |
 | Nextcloud | `https://your-host/remote.php/dav` |
-| Google | `https://apidata.googleusercontent.com/caldav/v2` |
 
 Then choose which calendars to show and map each to Family or one household
 member.
 
+**Google Calendar does not work this way.** Its CalDAV endpoint requires
+OAuth 2.0 and rejects app passwords, so use a subscribed feed instead — see
+below.
+
 ### A subscribed feed (ICS)
 
-For a school or fixtures calendar, use **Subscribe to a feed** and paste the
-`.ics` address. Feeds are read-only by nature.
+For a school or fixtures calendar — or for Google Calendar — use **Subscribe to
+a feed** and paste an `.ics` address. Feeds are read-only by nature.
+
+For Google, each calendar publishes its own address. In Google Calendar on the
+web (the mobile app does not expose this): hover the calendar in the left
+sidebar → **⋮** → **Settings and sharing** → **Integrate calendar** → copy
+**Secret address in iCal format**. Repeat per calendar you want on the board.
+
+Treat that address like a password: anyone holding it can read the whole
+calendar. It can be revoked with **Reset** beside it.
 
 Events stay editable only in the calendar they came from; OpenSkyLight reads
 and caches them and never writes back. A cached copy stays on the board if a

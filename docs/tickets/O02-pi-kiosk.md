@@ -44,3 +44,32 @@ The checklist itself is device-agnostic and still applies. Complete it against
 whatever device is chosen; partial results from the test rig are useful
 evidence for the kiosk half and should be recorded as such, clearly labelled
 with the hardware they came from.
+
+## Test-rig evidence (2026-09-22)
+
+**Hardware: Raspberry Pi 3B+ (1GB), Chromium on Raspberry Pi OS, server hosted
+separately on an amd64 Linux host.** Not the target device. These results carry
+forward as evidence for the device-agnostic checks; they do not close this
+ticket.
+
+| Check | Result |
+| --- | --- |
+| Board renders and serves a registered display | **Pass** — people, chores and calendar all render |
+| Calendar events reach the board | **Pass** via an ICS subscription |
+| Restored features on a real display | **Pass** — News tile, photo upload and photo tile |
+| Server recovery | **Pass** — container restart recovers without a browser reload |
+| Wi-Fi recovery | **Pass** — disconnect and reconnect recovers |
+| Browser recovery | **Not tested** — the relaunch launcher was not installed on the rig |
+
+No defects were found beyond those already fixed: the display-enrolment
+fragment could not be transferred between devices, Google CalDAV rejects
+app passwords, and JPEG validation rejected real photographs.
+
+Deliberately **not** run on this hardware, because it is device-specific and
+the device is changing: panel layout at the target resolution, DPMS sleep and
+wake, touch calibration, and post-OS-update re-checks.
+
+### Still required to close
+
+Browser-relaunch recovery, and every device-specific check above, run on the
+chosen device once `N16` settles what that is.
