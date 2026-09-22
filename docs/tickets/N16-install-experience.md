@@ -1,7 +1,7 @@
 # N16 - Install experience for a non-technical household
 
 Status: planned
-Depends on: a distribution decision (see below)
+Depends on: (none — the distribution decision is made)
 
 ## Context
 
@@ -22,22 +22,23 @@ self-hosted application running on a small computer**, with **Portainer kept as
 a deployable option for the more technical individual**. Portainer is therefore
 the advanced path, not the default — and no default currently exists.
 
-## The decision this needs first
+## The decision, already made
 
-The distribution mechanism is not chosen. The credible options, with the
-trade-off that actually separates them:
+[ADR 0004](../adr/0004-bootable-appliance-image.md) selects a **prebuilt
+bootable image**: write it to a USB stick or SSD, boot a small computer, finish
+setup from the phone. An install script and a `.deb` were both considered and
+rejected — they lower the barrier without removing it.
 
-- **A prebuilt bootable image** — flash to a USB stick or SSD, boot, configure
-  from the phone. The Home Assistant model. Best experience by a distance;
-  most work to build and maintain, and it owns OS updates forever.
-- **An install script** — one command on a fresh Debian/Ubuntu box that
-  installs the runtime, fetches a published image, and registers a service.
-  Far less work; still assumes the user can reach a terminal once.
-- **A distribution package** (`.deb`) — familiar to Linux users, invisible to
-  everyone else.
+What remains open, and belongs to whoever picks this up:
 
-Produce an ADR choosing one before building. The choice is not obvious and
-should not be made implicitly by whoever picks the ticket up.
+- **Base OS and image build** — and how it is produced in CI rather than by
+  hand.
+- **Update mechanism**, for both the application and the operating system. ADR
+  0004 names this as the main ongoing cost of the decision; design it rather
+  than leaving it implicit.
+- **First-boot behaviour** — what the household sees before any configuration
+  exists, and how it connects to the network. Settle `N02` against the chosen
+  device at the same time.
 
 ## Deliverable
 

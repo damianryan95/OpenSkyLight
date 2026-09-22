@@ -66,7 +66,9 @@ project owner and recorded as ADRs. They are now implementation tickets.
 The product becomes **a polished self-hosted application running on a small
 computer**, with **Portainer kept as a deployable option for the more technical
 individual**. Portainer is the advanced path; the default does not yet exist,
-which is what `N16` addresses.
+which is what `N16` addresses. [ADR 0004](adr/0004-bootable-appliance-image.md)
+settles the mechanism: a **prebuilt bootable image**, written to a USB stick or
+SSD and configured from the phone.
 
 The device is deliberately **open, and unlikely to be a Raspberry Pi**. An x86
 mini PC is the probable shape. Two consequences worth holding onto:
@@ -162,7 +164,7 @@ O02 --> N12
 | N05 | Phone-native calendar connector | planned | N13 |
 | N06 | Bidirectional calendar sync | planned | N05, N14 |
 | N15 | On-screen calendar editing | planned | N06 |
-| N16 | Install experience for a non-technical household | planned | a distribution ADR |
+| N16 | Install experience for a non-technical household | planned | — (ADR 0004 decided) |
 | N02 | Pi first-boot Wi-Fi AP pairing | planned | O02 |
 | N03 | Local network name for the server | planned | S06, O03 |
 | N04 | Phone-first setup wizard | planned | N02, N03, P01 |
