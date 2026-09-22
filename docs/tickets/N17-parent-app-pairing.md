@@ -8,7 +8,7 @@ Depends on: (none)
 Read `docs/tickets/N05-native-calendar-connector-adr.md`, section "Blocker found
 while scoping", which is why this ticket exists. Read
 [ADR 0005](../adr/0005-phone-app-delivery-vehicle.md) for the delivery vehicle
-this unblocks. Inspect `src/server/auth/` — particularly `DisplayDeviceService`,
+this unblocks. Inspect `src/server/auth/index.ts` — particularly `DisplayDeviceService`,
 which already implements the pattern this ticket generalises.
 
 The parent authentication model is same-origin by construction:
@@ -50,7 +50,7 @@ origin, without weakening the browser path.
 - **List and revoke paired phones** in parent administration, exactly as
   displays are listed and revoked.
 
-Likely files: `src/server/auth/*`, `src/server/api/router.ts`,
+Likely files: `src/server/auth/index.ts`, `src/server/api/router.ts`,
 `src/server/db/migrations.ts`, `src/shared/api/contract.ts`,
 `src/companion/src/api/client.ts`, `src/companion/src/pages/*`, tests.
 
