@@ -1,7 +1,7 @@
 # N05 - Phone-native calendar connector
 
 Status: planned
-Depends on: N13; delivery vehicle settled by ADR 0005
+Depends on: N13, N17; delivery vehicle settled by ADR 0005
 
 ## Context
 
@@ -89,12 +89,11 @@ which read the cookie. None accepts a bearer token.
 - **CORS with `SameSite=None`** — weakens the CSRF posture and demands HTTPS
   the LAN does not have. Not recommended.
 
-### Suggested split
+### Split
 
-This is its own piece of work and should not be smuggled into the calendar
-connector: **app pairing and token authentication for a non-same-origin parent
-client**, delivered first. The calendar connector then builds on a client that
-can actually talk to the server.
+Carved out as [`N17`](N17-parent-app-pairing.md) — app pairing and token
+authentication for a non-same-origin parent client — and must land first. This
+ticket then builds on a client that can actually talk to the server.
 
 ## Acceptance
 

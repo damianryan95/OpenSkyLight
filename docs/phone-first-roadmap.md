@@ -108,6 +108,7 @@ barrier for the target user, and it gates the product's core feature.
 2. **Phase 1 — Calendar independence** *(the headline change)*
    - `N13` Retire the Google OAuth layer and de-Google the event schema
    - `N14` CalDAV and ICS calendar source
+   - `N17` Parent app pairing and token authentication *(prerequisite)*
    - `N05` Phone-native calendar connector
 
 3. **Phase 2 — Phone-first onboarding**
@@ -155,7 +156,7 @@ N01 (standalone)
 
 N13 --> N14 --+
         |     +--> N06 --> N15
-N13 --> N05 --+
+N13 --> N17 --> N05 --+
 
 O02 --> N02 --> N04 <-- N03
               |
@@ -175,7 +176,8 @@ O02 --> N12
 | N01 | Removed-functionality audit | ready | — |
 | N13 | Retire the Google OAuth layer | ready | — |
 | N14 | CalDAV and ICS calendar source | planned | N13 |
-| N05 | Phone-native calendar connector | planned | N13 (ADR 0005 decided) |
+| N17 | Parent app pairing and token authentication | ready | — |
+| N05 | Phone-native calendar connector | planned | N13, N17 (ADR 0005 decided) |
 | N06 | Bidirectional calendar sync | planned | N05, N14 |
 | N15 | On-screen calendar editing | planned | N06 |
 | N16 | Install experience for a non-technical household | planned | — (ADR 0004 decided) |
