@@ -12,3 +12,19 @@ backups/
 
 # Personal Claude Code overrides; project settings.json is committed
 .claude/settings.local.json
+
+# Local copies made while deploying — a hand-edited compose file, an image or
+# source tarball built to move onto the server. They are snapshots of a moment,
+# not sources, and the tarballs are large enough that one careless `git add -A`
+# would put a hundred megabytes in the history permanently.
+*.backup
+*.tar.gz
+*.tgz
+
+# Signing material for the Android app. The platform's own .gitignore comments
+# these out by default, which is the wrong default for a repository that is
+# pushed anywhere: a leaked upload key cannot be rotated without losing the
+# ability to update an installed app.
+*.keystore
+*.jks
+keystore.properties
