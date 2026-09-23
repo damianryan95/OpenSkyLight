@@ -1,7 +1,95 @@
 # N05 - Phone-native calendar connector
 
-Status: planned
+Status: in progress (phase 1 of 4 — see the split below)
 Depends on: N13, N17; delivery vehicle settled by ADR 0005
+
+## Split proposed (2026-09-22)
+
+This ticket anticipated being split once scoped, and it needs to be: it spans a
+build system, a native platform, a server contract and an OS permission flow,
+and only one of those can be verified without a physical phone. Reported here
+rather than carved into the backlog unilaterally — the phases are the proposal,
+not a decision.
+
+1. **The Capacitor shell and app pairing** — Capacitor 8, a second Vite build
+   target for the native shell, the native HTTP bridge, in-app pairing against
+   the `N17` credential, and the Android platform. Delivers an installed app
+   that can administer the household from a foreign origin. **This phase is
+   being built now.**
+2. **The phone push contract** — the server route phase 3 pushes occurrences
+   to, with its idempotency, ordering, deletion reconciliation and per-source
+   last-seen feeding sync health. Server-side and fully testable with no device
+   at all, which is why it is worth separating: it is the part most likely to
+   be got subtly wrong and the part easiest to prove. `calendar_sources.kind`
+   already permits `'phone'`, so the schema is waiting for it.
+3. **Native calendar read and mapping** — plugin selection, the permission
+   flows, the calendar-selection and person-mapping UI, wired to phase 2. Needs
+   a real device on both platforms; this is the ticket's actual acceptance bar.
+4. **App build in CI** — APK in CI, signing, and artefact publication.
+
+**iOS cannot be built or verified from this machine.** It requires Xcode and
+therefore a Mac. Phases 1 and 4 are Android-only until one is available, and
+phase 3's acceptance criterion — a real-device check on *both* platforms —
+cannot be met at all. That is a hardware dependency of the same kind `O02` has,
+and should be tracked as one rather than discovered at the end.
+
+### Building the Android app
+
+`npm run build:app` produces the shell bundle in `out/app` (a second Vite
+config, because `/admin/` is meaningless inside a native shell). `npm run
+app:sync` rebuilds it and copies it into the Android project. The APK itself is
+Gradle's, and needs a JDK and the Android SDK on the environment rather than in
+the repo:
+
+```fish
+set -x JAVA_HOME "/c/Program Files/Android/Android Studio/jbr"
+set -x ANDROID_HOME "$HOME/AppData/Local/Android/Sdk"
+cd android; and ./gradlew assembleDebug
+```
+
+Android Studio's bundled JBR is a perfectly good JDK and saves installing a
+second one. The debug APK lands in
+`android/app/build/outputs/apk/debug/app-debug.apk`.
+
+**`CapacitorHttp` must stay enabled** in `capacitor.config.ts`. It is not a
+performance tweak: the webview origin is `https://localhost`, the parent
+credential travels in an `Authorization` header, that header always triggers a
+CORS preflight, and the server answers none by design. Without the native HTTP
+bridge the app authenticates against nothing. See `N17`'s section "The app must
+use a native HTTP bridge".
+
+**Cleartext is a second, separate switch, and it is the one that will catch
+you.** Android has blocked plain HTTP at the platform level since API 28, so a
+freshly generated Capacitor project builds, installs, launches and then fails
+every single request with a bare network error — which reads exactly like a
+wrong address. `allowMixedContent` in `capacitor.config.ts` does *not* lift it;
+that governs subresources inside the webview. The switch is
+`android/app/src/main/res/xml/network_security_config.xml`, referenced from
+`AndroidManifest.xml`. Both files are ours, not generated, so `cap sync` leaves
+them alone. The config explains why permitting cleartext is consistent with
+ADR 0002 and ADR 0003 rather than a lapse.
+
+### Verified on a real device (2026-09-23)
+
+Phase 1 was driven on an Android emulator (API 36.1) against a real server on a
+scratch database, not only built:
+
+- The app installs, launches, and renders the pairing screen.
+- Pairing with a server address and the household PIN succeeds over the native
+  HTTP bridge from `https://localhost` — a genuinely foreign origin.
+- The app then shows live household data, proving the `N17` bearer path end to
+  end through a real webview rather than through a test harness.
+- `parent_devices` holds one row whose `last_seen_at` advances after pairing,
+  confirming the credential authenticates subsequent requests; only a 32-byte
+  digest is stored.
+- Revoking that phone from a browser drops the app back to the pairing screen
+  on its next foreground, keeping the server address but demanding the PIN
+  again.
+- The complete server log for that whole cycle is one line. No credential, no
+  PIN, and the PIN backoff counter finished at zero.
+
+**Still unverified:** iOS entirely, background refresh, and anything involving
+an actual calendar — phases 2 and 3 have not started.
 
 ## Context
 

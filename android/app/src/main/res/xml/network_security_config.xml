@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Android has blocked cleartext HTTP by default since API 28, which silently
+  breaks every request this app makes: the household server is plain HTTP on a
+  LAN address, and ADR 0002 deliberately removed the trusted-HTTPS prerequisite
+  because a household cannot obtain a certificate for `openskylight.local` or
+  `192.168.1.50` without a cloud console and a registered domain — exactly the
+  steps product principle 1 calls a defect.
+
+  So cleartext is permitted, and the posture that makes that acceptable lives
+  elsewhere: ADR 0003 keeps the web surface off the public internet entirely,
+  reaching it from outside the home over WireGuard rather than by publishing it.
+
+  This is deliberately not scoped to named domains. The server's address is
+  whatever the household's router handed it, so there is no list to enumerate;
+  narrowing this to `openskylight.local` would break every numeric-IP install.
+-->
+<network-security-config>
+    <base-config cleartextTrafficPermitted="true">
+        <trust-anchors>
+            <certificates src="system" />
+        </trust-anchors>
+    </base-config>
+</network-security-config>

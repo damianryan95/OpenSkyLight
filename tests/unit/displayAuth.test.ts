@@ -4,7 +4,7 @@ import { join } from 'node:path'
 import { Readable } from 'node:stream'
 import type { IncomingMessage, ServerResponse } from 'node:http'
 import { afterEach, describe, expect, it } from 'vitest'
-import { DisplayDeviceService, HouseholdAuthService } from '../../src/server/auth'
+import { DisplayDeviceService, HouseholdAuthService, ParentDeviceService } from '../../src/server/auth'
 import { handleApiRequest, type ApiRouterDependencies } from '../../src/server/api/router'
 import { openServerDatabase, type ServerDatabase } from '../../src/server/db'
 import { createChoresRewardsService, createDisplayReadService, createHouseholdSettingsService, createListsDomain, createMealsDomain, createPeopleService } from '../../src/server/domain'
@@ -45,7 +45,7 @@ describe('display registration and capabilities', () => {
     const db = database()
     const auth = new HouseholdAuthService(db.sqlite)
     const displays = new DisplayDeviceService(db.sqlite)
-    const deps = { auth, displays }
+    const deps = { auth, displays, parentDevices: new ParentDeviceService(db.sqlite) }
     const baseHeaders = { origin: 'http://server.test', host: 'server.test', 'content-type': 'application/json' }
 
     expect((await call('POST', '/api/v1/displays', baseHeaders, { name: 'Kitchen' }, deps)).status).toBe(401)
@@ -65,7 +65,7 @@ describe('display registration and capabilities', () => {
     const db = database()
     const auth = new HouseholdAuthService(db.sqlite)
     const displays = new DisplayDeviceService(db.sqlite)
-    const deps = { auth, displays }
+    const deps = { auth, displays, parentDevices: new ParentDeviceService(db.sqlite) }
     const session = auth.setup('1234')
     const parentHeaders = { origin: 'http://server.test', host: 'server.test', 'content-type': 'application/json', cookie: `osl_parent_session=${session.sessionToken}`, 'x-osl-csrf-token': session.csrfToken }
     const registration = JSON.parse((await call('POST', '/api/v1/displays', parentHeaders, { name: 'Kitchen' }, deps)).body) as { id: string, credential: string }
@@ -81,7 +81,10 @@ describe('display registration and capabilities', () => {
     // A display credential permits the display-scoped read, but cannot access a parent mutation.
     expect((await call('GET', '/api/v1/display/session', displayHeaders, undefined, deps)).status).toBe(200)
     expect((await call('GET', '/api/v1/display/session', { authorization: 'Bearer not-a-device-credential' }, undefined, deps)).status).toBe(401)
-    expect((await call('POST', '/api/v1/displays', displayHeaders, { name: 'Forbidden' }, deps)).status).toBe(403)
+    // 401, not 403: a display credential is a bearer token, so it is answered
+    // by the parent bearer registry and rejected there — it never reaches the
+    // origin check that used to produce the 403.
+    expect((await call('POST', '/api/v1/displays', displayHeaders, { name: 'Forbidden' }, deps)).status).toBe(401)
     expect((await call('GET', '/api/v1/displays', displayHeaders, undefined, deps)).status).toBe(401)
 
     expect((await call('POST', `/api/v1/displays/${registration.id}/revoke`, parentHeaders, undefined, deps)).status).toBe(204)
@@ -98,7 +101,7 @@ describe('display registration and capabilities', () => {
     const settings = createHouseholdSettingsService(db.sqlite)
     const chores = createChoresRewardsService(db.sqlite)
     const dependencies = {
-      auth, displays, settings, chores,
+      auth, displays, parentDevices: new ParentDeviceService(db.sqlite), settings, chores,
       people: createPeopleService(db.sqlite), lists: createListsDomain(db.sqlite), meals: createMealsDomain(db.sqlite),
       displayRead: createDisplayReadService(db.sqlite, chores)
     }

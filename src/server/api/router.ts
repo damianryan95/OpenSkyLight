@@ -87,8 +87,19 @@ export async function handleApiRequest(request: IncomingMessage, response: Serve
 
     if (path === '/api/v1/auth/status') {
       if (method !== 'GET') throw new ApiRequestError(405, 'method_not_allowed', `Method ${method} is not allowed`)
-      const session = auth?.getParentSession(readCookie(request, PARENT_SESSION_COOKIE))
-      sendJson(response, 200, { configured: auth?.isConfigured() ?? false, authenticated: session !== undefined, expiresAt: session?.expiresAt ?? null })
+      // Deliberately never throws on a bad credential. This is the endpoint a
+      // client asks before it knows whether it is signed in, so a revoked app
+      // must learn it needs to pair again rather than get a 401 it cannot act
+      // on. A bearer has no expiry to report; the cookie session does.
+      const paired = readHeader(request, 'authorization') === undefined
+        ? undefined
+        : dependencies.parentDevices?.authenticate(readBearerToken(request))
+      const session = paired !== undefined ? undefined : auth?.getParentSession(readCookie(request, PARENT_SESSION_COOKIE))
+      sendJson(response, 200, {
+        configured: auth?.isConfigured() ?? false,
+        authenticated: paired !== undefined || session !== undefined,
+        expiresAt: session?.expiresAt ?? null
+      })
       return true
     }
 
@@ -811,14 +822,17 @@ function assertSameOrigin(request: IncomingMessage): void {
  * foreign page's behalf, because only the paired app holds it. There is
  * nothing here for CSRF or an origin check to defend, and requiring them would
  * simply lock out the cross-origin app this path exists to serve.
+ *
+ * A missing registry refuses rather than falling through to the cookie. The
+ * server cannot validate the token it was handed, and answering a credential it
+ * cannot check by quietly evaluating a different one would make the exclusivity
+ * above true only in a fully wired deployment. The refusal is worded exactly
+ * like a rejected token so a caller cannot tell the two apart.
  */
 function decidedByParentBearer(dependencies: ApiRouterDependencies, request: IncomingMessage): boolean {
   if (readHeader(request, 'authorization') === undefined) return false
-  // Without a parent registry there is no bearer credential to accept, so the
-  // request falls through to exactly the checks it faced before this path.
   const parentDevices = dependencies.parentDevices
-  if (parentDevices === undefined) return false
-  if (parentDevices.authenticate(readBearerToken(request)) === undefined) {
+  if (parentDevices === undefined || parentDevices.authenticate(readBearerToken(request)) === undefined) {
     throw new AuthError(401, 'unauthorized', 'A paired parent credential is required')
   }
   return true

@@ -8,9 +8,12 @@
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-status-bar-style" content="default" />
-    <link rel="manifest" href="/admin/manifest.webmanifest" />
-    <link rel="icon" type="image/png" href="/admin/icon-192.png" />
-    <link rel="apple-touch-icon" href="/admin/icon-192.png" />
+    <!-- Root-relative, not /admin/-prefixed: Vite rewrites these to whatever
+         `base` the build uses, which is /admin/ when the server serves this and
+         ./ inside the native shell, where /admin/ resolves to nothing. -->
+    <link rel="manifest" href="/manifest.webmanifest" />
+    <link rel="icon" type="image/png" href="/icon-192.png" />
+    <link rel="apple-touch-icon" href="/icon-192.png" />
     <title>OpenSkyLight</title>
   </head>
   <body>

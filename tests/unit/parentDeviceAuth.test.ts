@@ -174,6 +174,26 @@ describe('parent phone pairing and bearer authentication', () => {
     db.close()
   })
 
+  it('reports a paired phone as authenticated, and a revoked one as merely signed out', async () => {
+    const { db, deps, parentDevices } = harness()
+    deps.auth!.setup('1234')
+    const paired = JSON.parse((await pair(deps, '1234', 'Mum phone')).body) as { id: string, credential: string }
+    const asPhone = { authorization: `Bearer ${paired.credential}` }
+
+    const authenticated = await call('GET', '/api/v1/auth/status', asPhone, undefined, deps)
+    expect(authenticated.status).toBe(200)
+    // No expiry: a bearer credential lives until it is revoked.
+    expect(JSON.parse(authenticated.body)).toEqual({ configured: true, authenticated: true, expiresAt: null })
+
+    parentDevices.revoke(paired.id)
+    const revoked = await call('GET', '/api/v1/auth/status', asPhone, undefined, deps)
+    // 200 with authenticated:false, not 401 — the app must be able to act on
+    // this and offer to pair again.
+    expect(revoked.status).toBe(200)
+    expect(JSON.parse(revoked.body)).toMatchObject({ configured: true, authenticated: false })
+    db.close()
+  })
+
   it('refuses a CORS-simple pairing attempt before it can reach the shared PIN backoff', async () => {
     const { db, deps } = harness()
     deps.auth!.setup('1234')

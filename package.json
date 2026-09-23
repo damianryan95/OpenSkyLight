@@ -31,11 +31,14 @@
     "test:phone-chores": "npm run build:companion && node scripts/e2e-phone-chores-rewards.mjs",
     "test:phone-planning": "npm run build:companion && node scripts/e2e-phone-planning.mjs",
     "test:phone-displays": "npm run build:companion && node scripts/e2e-phone-displays-diagnostics.mjs",
+    "test:app-pairing": "npm run build:app && node scripts/e2e-app-pairing.mjs",
     "test:kiosk-browser": "npm run build:kiosk && npm run build:server && node scripts/e2e-kiosk-browser.mjs",
     "test:kiosk-connectivity": "npm run build:kiosk && npm run build:server && node scripts/e2e-kiosk-connectivity.mjs",
     "test:operations": "node ./node_modules/vitest/vitest.mjs run tests/unit/operations.test.ts",
     "test:multi-display": "npm run build:kiosk && npm run build:server && node scripts/e2e-multi-display.mjs",
-    "screenshots:personalization": "node scripts/capture-personalization-prototype.mjs"
+    "screenshots:personalization": "node scripts/capture-personalization-prototype.mjs",
+    "build:app": "vite build --config app.vite.config.ts",
+    "app:sync": "npm run build:app && cap sync android"
   },
   "dependencies": {
     "better-sqlite3": "^12.4.1",
@@ -47,6 +50,9 @@
     "zod": "^3.24.1"
   },
   "devDependencies": {
+    "@capacitor/android": "^8.5.2",
+    "@capacitor/cli": "^8.5.2",
+    "@capacitor/core": "^8.5.2",
     "@fontsource-variable/fraunces": "^5.1.0",
     "@fontsource-variable/nunito": "^5.1.0",
     "@tailwindcss/vite": "^4.0.6",

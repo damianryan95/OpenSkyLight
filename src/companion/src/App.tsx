@@ -2,7 +2,11 @@ import { FormEvent, useEffect, useState } from 'react'
 import {
   ApiError,
   clearParentSession,
+  disconnectFromHousehold,
+  getApiBaseUrl,
   getParentAuthStatus,
+  getParentCredential,
+  isNativeApp,
   loginParent,
   logoutParent,
   setUnauthorizedHandler,
@@ -16,6 +20,7 @@ import { PeopleCalendarsPage } from './pages/PeopleCalendarsPage'
 import { ChoresRewardsAdminPage } from './pages/ChoresRewardsAdminPage'
 import { ListsMealsAdminPage } from './pages/ListsMealsAdminPage'
 import { DisplaysDiagnosticsPage } from './pages/DisplaysDiagnosticsPage'
+import { PairingScreen } from './pages/PairingScreen'
 
 type SectionId = 'home' | 'household' | 'calendar' | 'chores' | 'planning' | 'displays'
 
@@ -31,15 +36,30 @@ const SECTIONS: { id: SectionId; label: string; description: string; icon: strin
 export default function App() {
   const [status, setStatus] = useState<ParentAuthStatus | null>(null)
   const [section, setSection] = useState<SectionId>('home')
+  // Bumped when a pairing is made or dropped, purely to re-read the two stored
+  // values below. They live in localStorage rather than state because the API
+  // client owns them and signs every request with them.
+  const [pairingGeneration, setPairingGeneration] = useState(0)
+  const native = isNativeApp()
+  const paired = !native || (getApiBaseUrl() !== '' && getParentCredential() !== null)
 
   useEffect(() => {
+    // An unpaired app has no address to ask, so asking would only produce a
+    // failure the pairing screen is already showing the way out of.
+    if (!paired) return
     let cancelled = false
     const refresh = async () => {
       try {
         const next = await getParentAuthStatus()
         if (!cancelled) setStatus(next)
-      } catch {
-        if (!cancelled) setStatus({ configured: true, authenticated: false, expiresAt: null })
+      } catch (reason) {
+        if (cancelled) return
+        // In the browser a failed status check means the session is gone. In
+        // the app the credential is held locally and survives the Wi-Fi
+        // dropping out, so a transport failure must not throw a working phone
+        // back to pairing — only a refusal the server actually made does.
+        const transient = native && !(reason instanceof ApiError)
+        setStatus((current) => (transient && current !== null ? current : { configured: true, authenticated: false, expiresAt: null }))
       }
     }
     setUnauthorizedHandler(() => {
@@ -56,8 +76,21 @@ export default function App() {
       document.removeEventListener('visibilitychange', onVisible)
       setUnauthorizedHandler(() => {})
     }
-  }, [])
+  }, [paired, native, pairingGeneration])
 
+  const unpair = () => {
+    disconnectFromHousehold()
+    setStatus(null)
+    setSection('home')
+    setPairingGeneration((generation) => generation + 1)
+  }
+
+  // Three ways an app is not usable yet: never paired, pointed at nothing, or
+  // revoked from another device. All three want the same screen, and the
+  // browser reaches none of them.
+  if (native && (!paired || status?.authenticated === false)) {
+    return <PairingScreen onPaired={(next) => { setStatus(next); setPairingGeneration((generation) => generation + 1) }} />
+  }
   if (status === null) return <LoadingScreen />
   if (!status.authenticated) {
     return <PinScreen configured={status.configured} onAuthenticated={setStatus} />
@@ -88,7 +121,7 @@ export default function App() {
           {(section === 'household' || section === 'calendar') && <PeopleCalendarsPage section={section} />}
           {section === 'chores' && <ChoresRewardsAdminPage />}
           {section === 'planning' && <ListsMealsAdminPage />}
-          {section === 'displays' && <DisplaysDiagnosticsPage />}
+          {section === 'displays' && <DisplaysDiagnosticsPage onUnpair={native ? unpair : undefined} />}
         </section>
       </main>
 

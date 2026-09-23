@@ -1,3 +1,4 @@
+import { Capacitor } from '@capacitor/core'
 import type { PairedParentDeviceDto, ParentDeviceDto, PairParentDeviceRequest } from '@shared/api/contract'
 import type { IpcChannel, IpcContract, IpcResult } from '@shared/ipc/contract'
 
@@ -11,6 +12,32 @@ export interface ParentAuthStatus {
   configured: boolean
   authenticated: boolean
   expiresAt: string | null
+}
+
+/** True only inside the Capacitor shell. The browser at `/admin/` is served by
+ * the household server itself, so it is already at the right origin with a
+ * session — none of the pairing machinery below applies to it, and this
+ * returning `false` on the web is what keeps that path untouched. */
+export function isNativeApp(): boolean {
+  return Capacitor.isNativePlatform()
+}
+
+/** What a parent types is never quite a base URL. They omit the scheme, they
+ * leave the trailing slash on, and — most often — they paste the browser
+ * address bar, which ends in `/admin/` because that is where they were. All
+ * three produce a base URL that fails every request, so fix them here rather
+ * than explaining them in an error afterwards. */
+export function normalizeServerAddress(input: string): string {
+  let value = input.trim()
+  // A pasted address carries the rest of the page with it.
+  value = value.replace(/[#?].*$/, '')
+  if (!/^[a-z][a-z0-9+.-]*:\/\//i.test(value)) value = `http://${value}`
+  value = value.replace(/\/+$/, '')
+  // Only when something is left that is still an address: a host genuinely
+  // called `admin` would otherwise be eaten down to `http:/`.
+  const withoutAdmin = value.replace(/\/admin$/i, '')
+  if (/^[a-z][a-z0-9+.-]*:\/\/.+/i.test(withoutAdmin)) value = withoutAdmin
+  return value.replace(/\/+$/, '')
 }
 
 export function getToken(): string | null {
@@ -211,6 +238,40 @@ export async function pairParentDevice(pin: string, name: string): Promise<Paren
   setParentCredential(paired.credential)
   const { credential: _credential, ...device } = paired
   return device
+}
+
+/** Point the app at a household server and pair it, as one step that either
+ * fully succeeds or leaves nothing behind.
+ *
+ * The unwind is the whole point. A half-applied attempt — a base URL stored
+ * against a server that refused the PIN, or an address with nothing listening
+ * — leaves the app posting to somewhere it can never authenticate, with no
+ * route back except reinstalling it. Keep the clears in the transport layer so
+ * no future caller has to remember them. */
+export async function connectToHousehold(address: string, pin: string, name: string): Promise<ParentAuthStatus> {
+  setApiBaseUrl(normalizeServerAddress(address))
+  try {
+    await pairParentDevice(pin, name)
+    const status = await getParentAuthStatus()
+    // A credential that does not authenticate is not a pairing. Treating this
+    // as success would drop the parent into an app where every screen fails.
+    if (!status.authenticated) throw new ApiError(401, 'unauthorized', 'The household did not accept this phone')
+    return status
+  } catch (reason) {
+    clearApiBaseUrl()
+    clearParentCredential()
+    clearParentSession()
+    throw reason
+  }
+}
+
+/** Forget the household on this phone. Deliberately local: the paired record
+ * stays on the server until a parent revokes it there, because a phone that
+ * could delete its own record could also cover its tracks. */
+export function disconnectFromHousehold(): void {
+  clearParentCredential()
+  clearApiBaseUrl()
+  clearParentSession()
 }
 
 export function listParentDevices(): Promise<{ parentDevices: ParentDeviceDto[] }> {

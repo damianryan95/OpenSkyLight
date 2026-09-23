@@ -7,7 +7,7 @@ import type { HomeTile, HomeTileType } from '@shared/types'
 
 /** Parent-only device administration. A credential is shown only once, directly
  * after registration, as a fragment-based enrollment link for the kiosk. */
-export function DisplaysDiagnosticsPage() {
+export function DisplaysDiagnosticsPage({ onUnpair }: { onUnpair?: () => void } = {}) {
   const [displays, setDisplays] = useState<DisplayDevice[]>([])
   const [sync, setSync] = useState<SyncStatus | null>(null)
   const [error, setError] = useState<string | null>(null)
@@ -30,7 +30,21 @@ export function DisplaysDiagnosticsPage() {
     </section>
     <ParentPhones />
     <Diagnostics sync={sync} onRefresh={load} />
+    {onUnpair && <UnpairThisPhone onUnpair={onUnpair} />}
   </div>
+}
+
+/** The way out of a wedged installed app: a phone revoked from elsewhere, or
+ * one connected to an address that turned out to be wrong, would otherwise
+ * have to be reinstalled. Present only in the native shell — the browser at
+ * `/admin/` has nothing to unpair. */
+function UnpairThisPhone({ onUnpair }: { onUnpair: () => void }) {
+  const [confirming, setConfirming] = useState(false)
+  return <section aria-labelledby="unpair-heading"><div className="mb-2"><h3 id="unpair-heading" className="font-display text-xl font-semibold">This phone</h3><p className="text-sm font-semibold text-ink-faint">Forget the household on this phone and connect it again — to a different address, or after it has been revoked.</p></div>
+    <Card>{confirming
+      ? <div className="rounded-xl bg-red-50 p-3"><p className="text-sm font-bold text-red-900">Unpair this phone? You will need the household server address and the household PIN to connect it again. It stays listed under Parent phones until someone revokes it there.</p><div className="mt-2 flex gap-2"><button type="button" className="pressable min-h-11 rounded-xl bg-red-700 px-4 font-extrabold text-white" onClick={onUnpair}>Unpair phone</button><GhostButton onClick={() => setConfirming(false)}>Cancel</GhostButton></div></div>
+      : <button type="button" className="min-h-11 text-sm font-extrabold text-red-700" onClick={() => setConfirming(true)}>Unpair this phone</button>}</Card>
+  </section>
 }
 
 /** Paired phones are listed and revoked here, never created here: a phone pairs
