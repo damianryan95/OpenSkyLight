@@ -24,14 +24,20 @@ not a decision.
    already permits `'phone'`, so the schema is waiting for it.
 3. **Native calendar read and mapping** — plugin selection, the permission
    flows, the calendar-selection and person-mapping UI, wired to phase 2. Needs
-   a real device on both platforms; this is the ticket's actual acceptance bar.
+   a real Android device; this is the ticket's actual acceptance bar.
 4. **App build in CI** — APK in CI, signing, and artefact publication.
 
-**iOS cannot be built or verified from this machine.** It requires Xcode and
-therefore a Mac. Phases 1 and 4 are Android-only until one is available, and
-phase 3's acceptance criterion — a real-device check on *both* platforms —
-cannot be met at all. That is a hardware dependency of the same kind `O02` has,
-and should be tracked as one rather than discovered at the end.
+**This ticket is Android-only** (owner's direction, 2026-09-23). iOS needs
+Xcode and therefore a Mac, which would leave `N05` permanently blocked on
+hardware nobody has. Everything iOS-specific — the platform, App Transport
+Security, the local-network prompt, EventKit, and App Store distribution — is
+carved out as [`N19`](N19-ios-app-platform.md), which is `blocked` on that
+hardware and honest about it.
+
+So the four phases above are Android phases, and this ticket's acceptance is
+met when Android is proven. `N19` re-proves the same criteria on iOS later; it
+does not get to change them, and it must not arrive by weakening something
+Android already relies on.
 
 ### Building the Android app
 
@@ -88,8 +94,9 @@ scratch database, not only built:
 - The complete server log for that whole cycle is one line. No credential, no
   PIN, and the PIN backoff counter finished at zero.
 
-**Still unverified:** iOS entirely, background refresh, and anything involving
-an actual calendar — phases 2 and 3 have not started.
+**Still unverified:** background refresh, and anything involving an actual
+calendar — phases 2 and 3 have not started. iOS is out of scope here and
+tracked as [`N19`](N19-ios-app-platform.md).
 
 ## Context
 
@@ -101,10 +108,14 @@ provider-agnostic seam `N13` leaves behind.
 ## Deliverable
 
 The companion phone app reads the calendars the phone already holds, through
-the operating system's own APIs (EventKit on iOS, CalendarProvider on
-Android), and pushes occurrences to the server. The household grants one OS
-permission prompt; there is no account to connect, no API key, and no
-credential for the server to store.
+the operating system's own API — **`CalendarProvider` on Android**; EventKit on
+iOS is [`N19`](N19-ios-app-platform.md) — and pushes occurrences to the server.
+The household grants one OS permission prompt; there is no account to connect,
+no API key, and no credential for the server to store.
+
+Keep the seam between "read this phone's calendars" and "push occurrences"
+clean enough that `N19` swaps the reader and nothing else. The push contract is
+platform-agnostic and should stay that way.
 
 - Let the parent choose which of the phone's calendars to share, and map each
   to Family or a household member using the existing mapping UI.
@@ -128,9 +139,9 @@ The web app at `/admin/` keeps working unchanged for households that install
 nothing.
 
 What remains open and belongs to this ticket: plugin selection for calendar
-access, the permission flows on both platforms, the push contract and its
-idempotency, and how the app is built in CI. Splitting the ticket once that is
-scoped is reasonable — report the split rather than silently expanding.
+access, the Android permission flow, the push contract and its idempotency, and
+how the app is built in CI. The split this invited has been made — see "Split
+proposed" at the top.
 
 Note the constraint ADR 0005 restates: Capacitor does **not** remove mobile
 background-execution limits. A phone-sourced calendar still goes stale when
@@ -195,6 +206,8 @@ at integration.
 
 ## Acceptance
 
+Android only; [`N19`](N19-ios-app-platform.md) re-proves these on iOS.
+
 - A parent grants calendar permission on the phone and sees those events on
   the kiosk without entering any URL, key, or password.
 - Repeated pushes are idempotent; deleted and cancelled events disappear from
@@ -207,4 +220,6 @@ at integration.
 
 Verify: idempotency and deletion-reconciliation tests, duplicate-source
 tests against `N14`, staleness-indicator test, and a real-device check on
-both mobile platforms.
+Android. An emulator has already proven the phase 1 pairing path end to end,
+but a phone's own calendar and its background behaviour are not things an
+emulator can stand in for — phase 3 needs real hardware.

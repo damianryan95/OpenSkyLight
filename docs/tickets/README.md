@@ -158,9 +158,12 @@ Product and technical direction: [`phone-first-roadmap.md`](../phone-first-roadm
 - [N16 - Install experience for a non-technical household](N16-install-experience.md)
 - [N17 - Parent app pairing and token authentication](N17-parent-app-pairing.md)
 - [N18 - Screen-displayed QR enrolment and household claim](N18-screen-qr-enrolment.md)
+- [N19 - iOS app platform and verification](N19-ios-app-platform.md)
 
 `N01`, `N13` and `N14` are done; `N17` is done and gates both `N05` and
-`N18`. The pairing ceremony is set by
+`N18`. **`N05` is Android-only**; iOS is `N19`, which is `blocked` on a Mac and
+should stay out of `N05`'s acceptance so that ticket can close. The pairing
+ceremony is set by
 [ADR 0006](../adr/0006-screen-initiated-pairing.md): the screen displays a QR
 and the phone scans it, which supersedes `A03`'s fragment-link enrolment and
 changes how `N04`'s wizard is entered. The calendar direction is set by

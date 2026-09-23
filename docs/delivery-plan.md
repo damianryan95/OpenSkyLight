@@ -53,6 +53,13 @@ milestone is pushed.
 model was same-origin by construction and a phone app is not same-origin. It
 has no hardware dependency either, and it also gates `N18` in Milestone 2.
 
+**`N05` is Android-only** (owner's direction, 2026-09-23). iOS needs Xcode and
+therefore a Mac, so holding `N05` open for it would block the milestone on
+hardware nobody has. Everything iOS-specific is `N19`, which is `blocked` and
+says so plainly. `N19` is not scheduled into a milestone: it is the same shape
+of dependency as `O02`, and acquiring the hardware is the gating action rather
+than writing code.
+
 Sequence:
 
 1. **`N13` — retire the Google layer.**
@@ -69,10 +76,12 @@ Sequence:
       `package.json`.
 2. **`N14` — CalDAV and ICS source**, built on the seam from step 1.
 3. **Push the milestone** once both are merged locally and CI is green.
-4. **`N05` — phone-native connector** follows as its own piece of work. It
-   needs a mobile delivery vehicle the current browser-based companion does not
-   have; scope that first and report back before building, splitting the ticket
-   if the approach warrants it.
+4. **`N05` — phone-native connector** follows as its own piece of work. The
+   delivery vehicle it lacked is settled (ADR 0005, Capacitor) and phase 1 has
+   landed: the companion now builds and runs as an installed Android app that
+   pairs with a household over the `N17` bearer path. What remains is the
+   connector itself — the push contract, then the native calendar read on a
+   real Android device, then the CI build. Android only; iOS is `N19`.
 
 **Exit criteria:** a parent connects a calendar from a phone using only a URL
 and an app password, events appear correctly on the kiosk including recurrence

@@ -109,7 +109,7 @@ barrier for the target user, and it gates the product's core feature.
    - `N13` Retire the Google OAuth layer and de-Google the event schema
    - `N14` CalDAV and ICS calendar source
    - `N17` Parent app pairing and token authentication *(prerequisite)*
-   - `N05` Phone-native calendar connector
+   - `N05` Phone-native calendar connector *(Android; iOS is `N19`)*
 
 3. **Phase 2 — Phone-first onboarding**
    - `N02` First-boot network pairing *(written Pi-first; settle against the
@@ -159,7 +159,7 @@ N01 (standalone)
 N13 --> N14 --+
               +--> N06 --> N15
 N13 --> N05 --+
-N17 --> N05
+N17 --> N05 --> N19 (blocked: needs a Mac)
 
 N17 --> N18 --> N04
 
@@ -183,7 +183,8 @@ O02 --> N12
 | N14 | CalDAV and ICS calendar source | done | N13 |
 | N17 | Parent app pairing and token authentication | done | — |
 | N18 | Screen-displayed QR enrolment and household claim | planned | N17 (ADR 0006 decided) |
-| N05 | Phone-native calendar connector | planned | N13, N17 (ADR 0005 decided) |
+| N05 | Phone-native calendar connector (Android) | in progress | N13, N17 (ADR 0005 decided) |
+| N19 | iOS app platform and verification | blocked | N05; needs a Mac |
 | N06 | Bidirectional calendar sync | planned | N05, N14 |
 | N15 | On-screen calendar editing | planned | N06 |
 | N16 | Install experience for a non-technical household | planned | — (ADR 0004 decided) |
