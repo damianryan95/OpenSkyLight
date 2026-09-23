@@ -1,7 +1,7 @@
 import type { IncomingMessage, ServerResponse } from 'node:http'
 import { z } from 'zod'
 import { DateTime } from 'luxon'
-import { addListItemRequestSchema, apiContract, apiInfoResponseSchema, choreCorrectionRequestSchema, connectCalDavRequestSchema, connectIcsRequestSchema, setCalendarSelectionRequestSchema, createChoreRequestSchema, createListRequestSchema, createPersonRequestSchema, createRewardRequestSchema, displayChoreCommandRequestSchema, mealRangeRequestSchema, mealSlotKindSchema, pairParentDeviceRequestSchema, redeemRewardRequestSchema, registerDisplayRequestSchema, setMealRequestSchema, setMealTemplateRequestSchema, starAdjustmentRequestSchema, updateChoreRequestSchema, updateDisplayRequestSchema, updateHouseholdSettingsRequestSchema, updateListRequestSchema, updatePersonRequestSchema, updateRewardRequestSchema } from '../../shared/api/contract'
+import { addListItemRequestSchema, apiContract, apiInfoResponseSchema, choreCorrectionRequestSchema, connectCalDavRequestSchema, connectIcsRequestSchema, connectPhoneRequestSchema, pushPhoneCalendarsConflictSchema, pushPhoneCalendarsRequestSchema, pushPhoneCalendarsResponseSchema, setCalendarSelectionRequestSchema, createChoreRequestSchema, createListRequestSchema, createPersonRequestSchema, createRewardRequestSchema, displayChoreCommandRequestSchema, mealRangeRequestSchema, mealSlotKindSchema, pairParentDeviceRequestSchema, redeemRewardRequestSchema, registerDisplayRequestSchema, setMealRequestSchema, setMealTemplateRequestSchema, starAdjustmentRequestSchema, updateChoreRequestSchema, updateDisplayRequestSchema, updateHouseholdSettingsRequestSchema, updateListRequestSchema, updatePersonRequestSchema, updateRewardRequestSchema } from '../../shared/api/contract'
 import { AuthError, CSRF_HEADER, DisplayDeviceService, HouseholdAuthService, ParentDeviceService, PARENT_SESSION_COOKIE } from '../auth'
 import { type ChoresRewardsService, type DisplayReadService, type HouseholdSettingsService, type ListsDomain, type MealsDomain, type PeopleService, type MediaService } from '../domain'
 import { createReadStream } from 'node:fs'
@@ -39,7 +39,8 @@ const pinRequestSchema = z.object({ pin: z.string() }).strict()
 const changePinRequestSchema = z.object({ newPin: z.string() }).strict()
 const connectCalendarSourceRequestSchema = z.discriminatedUnion('kind', [
   connectCalDavRequestSchema.extend({ kind: z.literal('caldav') }),
-  connectIcsRequestSchema.extend({ kind: z.literal('ics') })
+  connectIcsRequestSchema.extend({ kind: z.literal('ics') }),
+  connectPhoneRequestSchema.extend({ kind: z.literal('phone') })
 ])
 
 function requireParentDevices(dependencies: ApiRouterDependencies): ParentDeviceService {
@@ -394,7 +395,9 @@ export async function handleApiRequest(request: IncomingMessage, response: Serve
         const input = await readJsonBody(request, connectCalendarSourceRequestSchema)
         const source = input.kind === 'ics'
           ? await sources.connectIcs({ name: input.name, url: input.url })
-          : await sources.connectCalDav({ name: input.name, baseUrl: input.baseUrl, username: input.username, password: input.password })
+          : input.kind === 'phone'
+            ? sources.connectPhone({ name: input.name })
+            : await sources.connectCalDav({ name: input.name, baseUrl: input.baseUrl, username: input.username, password: input.password })
         if (input.kind === 'ics') void dependencies.syncScheduler?.syncNow()
         sendJson(response, 201, source)
         return true
@@ -410,11 +413,27 @@ export async function handleApiRequest(request: IncomingMessage, response: Serve
       response.writeHead(202); response.end(); return true
     }
 
-    const sourceMatch = /^\/api\/v1\/calendar-sources\/([^/]+)(?:\/(calendars))?$/.exec(path)
+    const sourceMatch = /^\/api\/v1\/calendar-sources\/([^/]+)(?:\/(calendars|push))?$/.exec(path)
     if (sourceMatch !== null) {
       const sources = requireSources(dependencies)
       const sourceId = decodeURIComponent(sourceMatch[1])
       const calendars = sourceMatch[2] === 'calendars'
+      if (sourceMatch[2] === 'push' && method === 'POST') {
+        // Parent-authenticated like every other mutation; the paired app
+        // reaches it over the bearer path. The payload is never logged: it is
+        // the household's calendar in full.
+        requireParentMutation(dependencies, request)
+        const result = sources.pushPhoneCalendars(sourceId, await readJsonBody(request, pushPhoneCalendarsRequestSchema))
+        if (!result.applied) {
+          sendJson(response, 409, pushPhoneCalendarsConflictSchema.parse({
+            error: { code: 'conflict', message: 'A newer snapshot has already been applied for this phone. Push again with a current timestamp.' },
+            stale: result.stale
+          }))
+          return true
+        }
+        sendJson(response, 200, pushPhoneCalendarsResponseSchema.parse({ calendars: result.calendars }))
+        return true
+      }
       if (calendars && method === 'GET') {
         requireParentRead(dependencies, request)
         const discovered = await sources.discoverCollections(sourceId)
@@ -437,7 +456,7 @@ export async function handleApiRequest(request: IncomingMessage, response: Serve
         publishInvalidation(dependencies, ['events'])
         response.writeHead(204); response.end(); return true
       }
-      if (!calendars && method === 'DELETE') {
+      if (sourceMatch[2] === undefined && method === 'DELETE') {
         requireParentMutation(dependencies, request)
         sources.remove(sourceId)
         publishInvalidation(dependencies, ['events'])

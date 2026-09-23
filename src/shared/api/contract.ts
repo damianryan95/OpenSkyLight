@@ -118,6 +118,80 @@ export const connectIcsRequestSchema = z.object({
   name: z.string().min(1).max(120),
   url: z.string().url().max(2000)
 }).strict()
+/** A phone source has no address and no credential: the phone pushes to us. */
+export const connectPhoneRequestSchema = z.object({
+  name: z.string().min(1).max(120)
+}).strict()
+
+/**
+ * One occurrence-bearing event read from a phone's own calendar store. It is
+ * deliberately the shape the cache already holds rather than an iCalendar
+ * document, so no platform has to serialise VEVENTs to talk to us.
+ *
+ * Two fields carry rules a client cannot guess:
+ * - `recurringEventId` is the *master's* `sourceEventId`, not its UID. The
+ *   cache resolves exceptions to masters through that identity, so an
+ *   exception whose master is absent or differently keyed is silently dropped.
+ * - `recurrenceExdates`/`recurrenceRdates` are ISO instants, not local dates;
+ *   they are compared against expanded occurrence starts.
+ */
+const phoneTimestampSchema = z.string().datetime({ offset: true })
+export const phoneEventSchema = z.object({
+  sourceEventId: z.string().min(1).max(512),
+  icalUid: z.string().min(1).max(512).nullish(),
+  title: z.string().max(1000),
+  description: z.string().max(20_000).nullish(),
+  location: z.string().max(1000).nullish(),
+  startAt: phoneTimestampSchema,
+  endAt: phoneTimestampSchema,
+  timezone: z.string().min(1).max(100),
+  allDay: z.boolean(),
+  recurrence: z.string().max(2000).nullish(),
+  recurrenceExdates: z.array(phoneTimestampSchema).max(500).nullish(),
+  recurrenceRdates: z.array(phoneTimestampSchema).max(500).nullish(),
+  recurringEventId: z.string().max(512).nullish(),
+  originalStartAt: phoneTimestampSchema.nullish(),
+  status: z.enum(['confirmed', 'cancelled']),
+  remoteUpdatedAt: phoneTimestampSchema.nullish()
+}).strict()
+
+/**
+ * A full-window snapshot of the calendars a phone holds. Full, not
+ * incremental: anything absent from a calendar's list is reconciled away, which
+ * is the only way a cancelled event reliably leaves the wall.
+ */
+export const pushPhoneCalendarsRequestSchema = z.object({
+  pushedAt: phoneTimestampSchema,
+  window: z.object({ start: phoneTimestampSchema, end: phoneTimestampSchema })
+    .strict()
+    .refine(({ start, end }) => Date.parse(start) < Date.parse(end), { message: 'window.end must be after window.start' }),
+  calendars: z.array(z.object({
+    sourceCalendarId: z.string().min(1).max(512),
+    name: z.string().min(1).max(200),
+    color: z.string().min(1).max(40).optional(),
+    events: z.array(phoneEventSchema).max(5000)
+  }).strict()).max(50)
+}).strict()
+
+export const pushPhoneCalendarsResponseSchema = z.object({
+  calendars: z.array(z.object({
+    sourceCalendarId: z.string().min(1),
+    /** False means the parent has not chosen this calendar; stop uploading it. */
+    selected: z.boolean(),
+    committed: z.number().int().nonnegative(),
+    lastPushedAt: z.string().datetime({ offset: true })
+  }))
+})
+
+/** The server's own view of what it last accepted, so a skewed phone clock can
+ * correct itself instead of silently losing every push it makes. */
+export const pushPhoneCalendarsConflictSchema = z.object({
+  error: z.object({ code: z.literal('conflict'), message: z.string() }),
+  stale: z.array(z.object({
+    sourceCalendarId: z.string().min(1),
+    lastPushedAt: z.string().datetime({ offset: true })
+  }))
+})
 export const householdSettingsSchema = z.object({ timezone: z.string().min(1), weather: z.object({ lat: z.number().min(-90).max(90), lon: z.number().min(-180).max(180), label: z.string().min(1).max(120) }).nullable() })
 export const updateHouseholdSettingsRequestSchema = householdSettingsSchema.pick({ timezone: true, weather: true }).partial()
   .refine((value) => Object.keys(value).length > 0, { message: 'At least one household setting is required' })
@@ -275,5 +349,8 @@ export type PairParentDeviceRequest = z.infer<typeof pairParentDeviceRequestSche
 export type PersonDto = z.infer<typeof personSchema>
 export type CalendarSourceDto = z.infer<typeof calendarSourceSchema>
 export type DiscoveredCalendarDto = z.infer<typeof discoveredCalendarSchema>
+export type PhoneEventDto = z.infer<typeof phoneEventSchema>
+export type PushPhoneCalendarsRequest = z.infer<typeof pushPhoneCalendarsRequestSchema>
+export type PushPhoneCalendarsResponse = z.infer<typeof pushPhoneCalendarsResponseSchema>
 export type ListAdminDto = z.infer<typeof listSchema>
 export type MealSlotAdminDto = z.infer<typeof mealSlotSchema>

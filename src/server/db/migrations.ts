@@ -317,6 +317,13 @@ const migrations: readonly string[] = [
       last_seen_at TEXT,
       revoked_at TEXT
     );
+  `,
+
+  // 011 - the phone's own clock for the last snapshot applied to a calendar.
+  // A phone pushes full-window snapshots, so an out-of-order push would
+  // otherwise resurrect events a newer one had already reconciled away.
+  `
+    ALTER TABLE calendars ADD COLUMN last_pushed_at TEXT;
   `
 ]
 

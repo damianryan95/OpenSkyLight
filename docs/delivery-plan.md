@@ -81,7 +81,9 @@ Sequence:
    landed: the companion now builds and runs as an installed Android app that
    pairs with a household over the `N17` bearer path. What remains is the
    connector itself — the push contract, then the native calendar read on a
-   real Android device, then the CI build. Android only; iOS is `N19`.
+   real Android device, then the CI build. Android only; iOS is `N19`. Phase 2
+   (the push contract, with its ordering guard and CalDAV deduplication) is
+   built and server-verified; phase 3 is the first part that needs hardware.
 
 **Exit criteria:** a parent connects a calendar from a phone using only a URL
 and an app password, events appear correctly on the kiosk including recurrence

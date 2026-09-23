@@ -1,16 +1,17 @@
 import { randomUUID } from 'node:crypto'
 import type Database from 'better-sqlite3'
-import type { CalendarSourceDto } from '../../shared/api/contract'
+import type { CalendarSourceDto, PushPhoneCalendarsRequest } from '../../shared/api/contract'
+import { fromIso, isoUtc } from '../../shared/dates'
 import { DomainValidationError } from '../domain/errors'
 import { createCalDavClient, fetchIcsFeed, CalDavError, type CalDavCollection, type Fetcher } from './caldav'
-import { mapCalendarDocument } from './ical'
+import { mapCalendarDocument, type CachedIcalEvent } from './ical'
 import { commitCalendarEvents, syncWindow } from './pull'
 import { applicationKey, decryptSecret, encryptSecret } from './secrets'
 import type { CalendarSyncStatusService } from './status'
 
 interface SourceRow {
   id: string
-  kind: 'caldav' | 'ics'
+  kind: 'caldav' | 'ics' | 'phone'
   name: string
   connected_at: string
   last_succeeded_at: string | null
@@ -18,6 +19,55 @@ interface SourceRow {
   base_url: string | null
   username: string | null
   password_enc: Buffer | null
+}
+
+interface StoredCalendarRow {
+  id: string
+  source_calendar_id: string
+  selected: number
+  last_pushed_at: string | null
+}
+
+export interface PhonePushCalendarResult {
+  sourceCalendarId: string
+  selected: boolean
+  committed: number
+  lastPushedAt: string
+}
+
+export type PhonePushResult =
+  | { applied: true; calendars: PhonePushCalendarResult[] }
+  | { applied: false; stale: { sourceCalendarId: string; lastPushedAt: string }[] }
+
+/**
+ * A pushed event in the cache's own shape. The phone holds no HTTP entity tag,
+ * so `etag` is null and the commit compares rows rather than tags — exactly as
+ * an ICS feed already does. Times are normalised to UTC here so a phone that
+ * sends local offsets stores the same instants a CalDAV sync would.
+ */
+function toCachedEvent(event: PushPhoneCalendarsRequest['calendars'][number]['events'][number]): CachedIcalEvent {
+  const utc = (value: string | null | undefined): string | null => (value == null ? null : isoUtc(fromIso(value)))
+  const utcList = (values: readonly string[] | null | undefined): string | null =>
+    values == null || values.length === 0 ? null : JSON.stringify(values.map((value) => isoUtc(fromIso(value))))
+  return {
+    sourceEventId: event.sourceEventId,
+    etag: null,
+    icalUid: event.icalUid ?? null,
+    title: event.title,
+    description: event.description ?? null,
+    location: event.location ?? null,
+    startAt: utc(event.startAt)!,
+    endAt: utc(event.endAt)!,
+    timezone: event.timezone,
+    allDay: event.allDay,
+    recurrence: event.recurrence ?? null,
+    recurrenceExdates: utcList(event.recurrenceExdates),
+    recurrenceRdates: utcList(event.recurrenceRdates),
+    recurringEventId: event.recurringEventId ?? null,
+    originalStartAt: utc(event.originalStartAt),
+    status: event.status,
+    remoteUpdatedAt: utc(event.remoteUpdatedAt)
+  }
 }
 
 export interface CalendarSourceServiceOptions {
@@ -99,9 +149,40 @@ export function createCalendarSourceService(
     return toDto(requireSource(id))
   }
 
+  /**
+   * Registers a phone as a calendar source. There is no address to reach and no
+   * credential to verify — the phone pushes to us — so there is nothing here to
+   * fail, and nothing to store that could later leak.
+   */
+  function connectPhone(input: { name: string }): CalendarSourceDto {
+    const name = input.name.trim()
+    if (!name) throw new DomainValidationError('Give this phone a name.')
+    const id = randomUUID()
+    sqlite.prepare("INSERT INTO calendar_sources (id, kind, name, connected_at) VALUES (?, 'phone', ?, ?)")
+      .run(id, name, now().toISOString())
+    return toDto(requireSource(id))
+  }
+
   /** Remote collections, annotated with the household's current selection. */
   async function discoverCollections(sourceId: string): Promise<(CalDavCollection & { selected: boolean; audiencePersonId: string | null })[]> {
     const row = requireSource(sourceId)
+    // A phone announces its own catalogue by pushing; there is nothing to
+    // discover over the network, and asking a CalDAV client would simply throw.
+    // Unselected rows exist here, so selection is the column, not the presence.
+    if (row.kind === 'phone') {
+      return sqlite.prepare<[string], { source_calendar_id: string; name: string; color: string; selected: number; audience_person_id: string | null }>(
+        'SELECT source_calendar_id, name, color, selected, audience_person_id FROM calendars WHERE source_id = ? AND deleted_at IS NULL ORDER BY name, source_calendar_id'
+      ).all(sourceId).map((calendar) => ({
+        url: calendar.source_calendar_id,
+        name: calendar.name,
+        color: calendar.color,
+        // The board cannot write back into a phone's calendar store, so every
+        // phone calendar is read-only to the household.
+        readOnly: true,
+        selected: calendar.selected === 1,
+        audiencePersonId: calendar.audience_person_id
+      }))
+    }
     const collections = await clientFor(row).discover()
     const selected = sqlite.prepare<[string], { source_calendar_id: string; audience_person_id: string | null }>(
       'SELECT source_calendar_id, audience_person_id FROM calendars WHERE source_id = ? AND deleted_at IS NULL'
@@ -140,6 +221,84 @@ export function createCalendarSourceService(
     }
   }
 
+  /**
+   * Applies one full-window snapshot pushed by a paired phone.
+   *
+   * The phone is the only thing that can read its own calendar store, so this
+   * is the inverse of every other source: nothing is fetched, and the payload
+   * is staged in memory by the caller's parser before a single transaction
+   * commits it. Calendars the parent has not selected are catalogued so they
+   * appear in the selection UI, but their events never reach the board.
+   */
+  function pushPhoneCalendars(sourceId: string, payload: PushPhoneCalendarsRequest): PhonePushResult {
+    const row = requireSource(sourceId)
+    if (row.kind !== 'phone') throw new DomainValidationError('Only a phone source accepts a calendar push.')
+    const pushedAt = isoUtc(fromIso(payload.pushedAt))
+
+    const stored = new Map(sqlite.prepare<[string], StoredCalendarRow>(
+      'SELECT id, source_calendar_id, selected, last_pushed_at FROM calendars WHERE source_id = ? AND deleted_at IS NULL'
+    ).all(row.id).map((calendar) => [calendar.source_calendar_id, calendar]))
+
+    // Out of order, not merely repeated: a snapshot older than the one already
+    // applied would resurrect events a newer push had reconciled away. The
+    // whole push is refused rather than partially applied, and the server's own
+    // value goes back so a phone with a skewed clock can correct itself instead
+    // of losing every push it makes from here on.
+    const stale = payload.calendars
+      .map((calendar) => ({ calendar, existing: stored.get(calendar.sourceCalendarId) }))
+      .filter(({ existing }) => existing?.last_pushed_at != null && Date.parse(pushedAt) < Date.parse(existing.last_pushed_at))
+      .map(({ calendar, existing }) => ({ sourceCalendarId: calendar.sourceCalendarId, lastPushedAt: existing!.last_pushed_at! }))
+    if (stale.length > 0) return { applied: false, stale }
+
+    const timestamp = now().toISOString()
+    const results: PhonePushCalendarResult[] = []
+    const committedCalendarIds: string[] = []
+    let changed = false
+
+    sqlite.transaction(() => {
+      for (const calendar of payload.calendars) {
+        const existing = stored.get(calendar.sourceCalendarId)
+        let calendarId: string
+        let selected: boolean
+        if (existing === undefined) {
+          // Unselected on arrival: a calendar the parent has never chosen must
+          // become visible to choose, not visible on the wall.
+          calendarId = randomUUID()
+          selected = false
+          sqlite.prepare('INSERT INTO calendars (id, source_id, source_calendar_id, name, color, selected) VALUES (?, ?, ?, ?, COALESCE(?, \'#0091FF\'), 0)')
+            .run(calendarId, row.id, calendar.sourceCalendarId, calendar.name, calendar.color ?? null)
+        } else {
+          calendarId = existing.id
+          selected = existing.selected === 1
+          // The phone owns its calendars' names and colours; the parent owns
+          // the selection and the person mapping, so neither is touched here.
+          sqlite.prepare('UPDATE calendars SET name = ?, color = COALESCE(?, color) WHERE id = ?')
+            .run(calendar.name, calendar.color ?? null, calendarId)
+        }
+
+        if (selected) {
+          options.status?.start(calendarId)
+          const result = commitCalendarEvents(sqlite, calendarId, calendar.events.map(toCachedEvent), timestamp)
+          changed = changed || result.changed
+          committedCalendarIds.push(calendarId)
+        }
+        sqlite.prepare('UPDATE calendars SET last_pushed_at = ? WHERE id = ?').run(pushedAt, calendarId)
+        results.push({
+          sourceCalendarId: calendar.sourceCalendarId,
+          selected,
+          committed: selected ? calendar.events.length : 0,
+          lastPushedAt: pushedAt
+        })
+      }
+      sqlite.prepare('UPDATE calendar_sources SET last_attempted_at = ?, last_succeeded_at = ?, last_error = NULL WHERE id = ?')
+        .run(timestamp, timestamp, row.id)
+    })()
+
+    for (const calendarId of committedCalendarIds) options.status?.succeed(calendarId)
+    if (changed) options.onEventsChanged?.()
+    return { applied: true, calendars: results }
+  }
+
   function remove(sourceId: string): void {
     const row = requireSource(sourceId)
     // Calendars and their events cascade from the source row.
@@ -148,6 +307,11 @@ export function createCalendarSourceService(
 
   async function syncSource(sourceId: string): Promise<{ changed: boolean }> {
     const row = requireSource(sourceId)
+    // A phone is pushed from, never pulled. Falling through would ask the
+    // CalDAV client for a source with no address and record that refusal as a
+    // sync failure on every scheduler tick, so a phone whose data is perfectly
+    // fresh would report as broken.
+    if (row.kind === 'phone') return { changed: false }
     const calendars = sqlite.prepare<[string], { id: string; source_calendar_id: string }>(
       'SELECT id, source_calendar_id FROM calendars WHERE source_id = ? AND selected = 1 AND deleted_at IS NULL'
     ).all(row.id)
@@ -216,7 +380,7 @@ export function createCalendarSourceService(
     return { changed }
   }
 
-  return { list, connectCalDav, connectIcs, discoverCollections, setCalendarSelection, remove, syncSource, syncAll }
+  return { list, connectCalDav, connectIcs, connectPhone, discoverCollections, setCalendarSelection, pushPhoneCalendars, remove, syncSource, syncAll }
 }
 
 export type CalendarSourceService = ReturnType<typeof createCalendarSourceService>

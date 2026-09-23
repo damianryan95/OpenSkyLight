@@ -1,6 +1,6 @@
 # N05 - Phone-native calendar connector
 
-Status: in progress (phase 1 of 4 — see the split below)
+Status: in progress (phases 1 and 2 done; phase 3 needs an Android device)
 Depends on: N13, N17; delivery vehicle settled by ADR 0005
 
 ## Split proposed (2026-09-22)
@@ -14,14 +14,10 @@ not a decision.
 1. **The Capacitor shell and app pairing** — Capacitor 8, a second Vite build
    target for the native shell, the native HTTP bridge, in-app pairing against
    the `N17` credential, and the Android platform. Delivers an installed app
-   that can administer the household from a foreign origin. **This phase is
-   being built now.**
-2. **The phone push contract** — the server route phase 3 pushes occurrences
-   to, with its idempotency, ordering, deletion reconciliation and per-source
-   last-seen feeding sync health. Server-side and fully testable with no device
-   at all, which is why it is worth separating: it is the part most likely to
-   be got subtly wrong and the part easiest to prove. `calendar_sources.kind`
-   already permits `'phone'`, so the schema is waiting for it.
+   that can administer the household from a foreign origin. **Built and
+   verified on a device, 2026-09-23.**
+2. **The phone push contract** — **built and server-verified, 2026-09-23.**
+   See "The push contract" below.
 3. **Native calendar read and mapping** — plugin selection, the permission
    flows, the calendar-selection and person-mapping UI, wired to phase 2. Needs
    a real Android device; this is the ticket's actual acceptance bar.
@@ -95,8 +91,81 @@ scratch database, not only built:
   PIN, and the PIN backoff counter finished at zero.
 
 **Still unverified:** background refresh, and anything involving an actual
-calendar — phases 2 and 3 have not started. iOS is out of scope here and
-tracked as [`N19`](N19-ios-app-platform.md).
+calendar — phase 3 has not started. iOS is out of scope here and tracked as
+[`N19`](N19-ios-app-platform.md).
+
+## The push contract (phase 2, built 2026-09-23)
+
+A phone source has **no credential**: no `base_url`, no `username`, no
+`password_enc`. Only occurrence data is ever pushed, which is the property ADR
+0005 called worth protecting.
+
+`POST /api/v1/calendar-sources/:id/push`, parent-authenticated — the `N17`
+bearer path is how the app reaches it. The body is a **full-window snapshot**,
+not a delta: `pushedAt`, a `window`, and for each calendar its
+`sourceCalendarId`, `name` and complete `events` list.
+
+Four behaviours are load-bearing:
+
+- **Reconciliation reuses `commitCalendarEvents`.** Every push is a complete
+  snapshot, so an event absent from one is cancelled. There is deliberately no
+  second reconciliation path to drift from the CalDAV one.
+- **Ordering is guarded by `calendars.last_pushed_at`** (migration 011). A push
+  older than the stored value is refused with `409`, which carries the server's
+  current value so a phone whose clock moved backwards can correct itself
+  instead of silently losing data. The comparison is only ever between one
+  phone and its own previous push — a calendar belongs to one device — so no
+  cross-device clock agreement is required. The whole payload is refused rather
+  than part of it: one `pushedAt` covers every calendar, so a mismatch is a
+  clock problem, not a partial one.
+- **Selection stays the parent's.** A push *announces* the phone's calendars
+  and they are catalogued unselected; events are committed only for selected
+  ones. The response reports `selected` and `committed` per calendar so the app
+  can stop uploading calendars nobody wants. A push never changes `selected` or
+  `audience_person_id` — the phone owns names, the parent owns the mapping.
+- **Sync health is shared, not special-cased.** A push updates the same
+  `last_succeeded_at`/`last_synced_at` timestamps a CalDAV sync does, so
+  staleness surfaces through the existing route. `syncSource` returns early for
+  a phone source; without that, every scheduler tick recorded "not a CalDAV
+  account" and flipped a perfectly fresh phone source to `failed`.
+
+### Deduplication against CalDAV
+
+A household can reach one calendar twice — the phone holds it *and* a CalDAV
+account serves it. iCalendar UIDs are globally unique, so the same non-null
+`ical_uid` from two sources is the same event and only one copy reaches the
+board. **The server-side copy wins**, because it stays fresh when nobody opens
+the app, which is exactly why ADR 0002 kept it. Deduplication happens at master
+granularity so a recurring series is never split across sources, and a null
+`ical_uid` is never deduplicated against anything.
+
+### Verified against a running server
+
+Driven end to end and read back through a registered display's
+`events:getOccurrences` RPC — what the kiosk actually renders, not an internal
+query: an unselected calendar is catalogued but contributes nothing; selecting
+it and re-pushing puts both events on the board; an identical re-push changes
+nothing; an event dropped from a later snapshot leaves the board; **a stale
+push is refused and does not resurrect it**; and with a CalDAV source seeded
+carrying the same `ical_uid`, the board shows one copy of the shared event —
+the CalDAV one — alongside the phone-only event, which is untouched. The server
+log for the whole cycle is one line.
+
+### Carried into phase 3
+
+- **Body size.** `MAX_JSON_BODY_BYTES` is 1 MB and bites at roughly 4000 events,
+  before the schema's 5000-per-calendar cap. A 400-day window for a busy
+  household can hit `413`. It fails loudly, but phase 3 must either chunk by
+  window or raise the cap for this route. Decide before writing the client.
+- **Selection does not backfill.** The board stays empty until the next push,
+  because `syncNow()` is a no-op for a phone source. The app must push when the
+  parent changes a selection.
+- **`recurringEventId` must be the master's `sourceEventId`**, not its UID. An
+  exception keyed any other way is silently dropped by the feed's orphan rule.
+  This is the likeliest integration bug in phase 3.
+- **Deselecting a phone calendar drops its row and its `last_pushed_at`**, so
+  the ordering guard resets. A later push re-creates it unselected, so nothing
+  reaches the board — safe, but surprising if unexpected.
 
 ## Context
 

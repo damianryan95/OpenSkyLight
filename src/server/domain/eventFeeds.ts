@@ -9,6 +9,8 @@ interface EventRow {
   id: string
   calendar_id: string
   source_event_id: string
+  ical_uid: string | null
+  source_kind: 'caldav' | 'ics' | 'phone'
   title: string
   description: string | null
   location: string | null
@@ -60,6 +62,33 @@ function asException(row: EventRow, masterId: string): ExceptionLike | null {
   }
 }
 
+/**
+ * One household calendar reached through two sources — a phone that holds it
+ * and a CalDAV account that serves it — caches the same event twice. iCalendar
+ * UIDs are globally unique by specification, so the same non-null `ical_uid`
+ * from two sources is the same event, and only one copy may reach the board.
+ *
+ * The server-side copy wins. It stays fresh when nobody opens the phone app,
+ * which is precisely the property ADR 0002 kept a server-side source for, so it
+ * is the more trustworthy of the two. Deduplication is deliberately done at
+ * master granularity: an exception is attached to a master within its own
+ * calendar, so dropping a master takes its exceptions with it and no series is
+ * ever split across sources. A null `ical_uid` identifies nothing and is never
+ * deduplicated against anything.
+ */
+function preferredMasters(masters: readonly EventRow[]): EventRow[] {
+  const serverSideFirst = (row: EventRow): number => (row.source_kind === 'phone' ? 1 : 0)
+  const winners = new Map<string, EventRow>()
+  for (const master of masters) {
+    if (master.ical_uid === null) continue
+    const incumbent = winners.get(master.ical_uid)
+    // Rows arrive ordered by start then id, so an equal-rank tie keeps the
+    // first deterministically rather than depending on scan order.
+    if (incumbent === undefined || serverSideFirst(master) < serverSideFirst(incumbent)) winners.set(master.ical_uid, master)
+  }
+  return masters.filter((master) => master.ical_uid === null || winners.get(master.ical_uid) === master)
+}
+
 function assertWindow(window: EventFeedWindow): void {
   const start = Date.parse(window.start)
   const end = Date.parse(window.end)
@@ -78,13 +107,14 @@ export function createEventFeedService(sqlite: Database.Database) {
     SELECT id, name, role FROM people WHERE deleted_at IS NULL ORDER BY sort_order, created_at
   `)
   const eventStatement = sqlite.prepare<[], EventRow>(`
-    SELECT e.id, e.calendar_id, e.source_event_id, e.title, e.description, e.location,
+    SELECT e.id, e.calendar_id, e.source_event_id, e.ical_uid, e.title, e.description, e.location,
            e.start_at, e.end_at, e.timezone, e.all_day, e.recurrence, e.recurrence_exdates,
            e.recurrence_rdates, e.recurring_event_id, e.original_start_at, e.status,
-           c.audience_person_id
+           c.audience_person_id, s.kind AS source_kind
     FROM events e
     JOIN calendars c ON c.id = e.calendar_id
-    WHERE c.selected = 1 AND c.deleted_at IS NULL
+    JOIN calendar_sources s ON s.id = c.source_id
+    WHERE c.selected = 1 AND c.deleted_at IS NULL AND s.deleted_at IS NULL
     ORDER BY e.start_at, e.id
   `)
 
@@ -92,7 +122,7 @@ export function createEventFeedService(sqlite: Database.Database) {
     assertWindow(window)
     const people = peopleStatement.all()
     const rows = eventStatement.all()
-    const masters = rows.filter((row) => row.recurring_event_id === null && row.status === 'confirmed')
+    const masters = preferredMasters(rows.filter((row) => row.recurring_event_id === null && row.status === 'confirmed'))
     const masterBySourceKey = new Map(masters.map((row) => [`${row.calendar_id}\u0000${row.source_event_id}`, row]))
     const exceptionsByMaster = new Map<string, EventRow[]>()
     for (const row of rows) {
