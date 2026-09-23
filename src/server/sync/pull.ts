@@ -18,14 +18,22 @@ export function syncWindow(now: Date): { start: Date; end: Date } {
  * stages the complete set first, so a failed or partial fetch never mutates a
  * cache the board is still rendering from.
  *
- * Every sync is a full snapshot of the window, so anything absent from it is
- * cancelled rather than left to linger on the wall.
+ * Every sync is a full snapshot, so anything absent from it is cancelled rather
+ * than left to linger on the wall.
+ *
+ * `window` narrows what "absent" may cancel. A caller that fetched the whole
+ * calendar omits it and anything missing is cancelled. A caller that fetched
+ * only a slice — a phone chunking a large window to stay under the request body
+ * limit — passes that slice, and events outside it are left alone because this
+ * snapshot says nothing about them. Without that, the first chunk of a chunked
+ * push would cancel every event the later chunks were about to carry.
  */
 export function commitCalendarEvents(
   sqlite: Database.Database,
   calendarId: string,
   events: readonly CachedIcalEvent[],
-  timestamp: string
+  timestamp: string,
+  window?: { start: string; end: string }
 ): { changed: boolean } {
   let changed = false
   sqlite.transaction(() => {
@@ -56,9 +64,17 @@ export function commitCalendarEvents(
     for (const event of events.filter((event) => event.recurringEventId === null)) persist(event)
     for (const event of events.filter((event) => event.recurringEventId !== null)) persist(event)
 
-    const absent = sqlite.prepare<[string], { id: string; source_event_id: string }>(
-      "SELECT id, source_event_id FROM events WHERE calendar_id = ? AND status != 'cancelled'"
-    ).all(calendarId).filter((event) => !seen.has(event.source_event_id))
+    // A recurring master is only ever described by the snapshot that carries
+    // it, so scope by the master's own start rather than by where its
+    // occurrences happen to fall.
+    const candidates = window === undefined
+      ? sqlite.prepare<[string], { id: string; source_event_id: string }>(
+        "SELECT id, source_event_id FROM events WHERE calendar_id = ? AND status != 'cancelled'"
+      ).all(calendarId)
+      : sqlite.prepare<[string, string, string], { id: string; source_event_id: string }>(
+        "SELECT id, source_event_id FROM events WHERE calendar_id = ? AND status != 'cancelled' AND start_at >= ? AND start_at < ?"
+      ).all(calendarId, window.start, window.end)
+    const absent = candidates.filter((event) => !seen.has(event.source_event_id))
     for (const event of absent) {
       sqlite.prepare("UPDATE events SET status = 'cancelled', updated_at = ? WHERE id = ?").run(timestamp, event.id)
       changed = true

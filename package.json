@@ -53,6 +53,7 @@
     "@capacitor/android": "^8.5.2",
     "@capacitor/cli": "^8.5.2",
     "@capacitor/core": "^8.5.2",
+    "@ebarooni/capacitor-calendar": "^8.7.0",
     "@fontsource-variable/fraunces": "^5.1.0",
     "@fontsource-variable/nunito": "^5.1.0",
     "@tailwindcss/vite": "^4.0.6",

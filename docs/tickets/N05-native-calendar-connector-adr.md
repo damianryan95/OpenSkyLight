@@ -134,10 +134,25 @@ Four behaviours are load-bearing:
 A household can reach one calendar twice — the phone holds it *and* a CalDAV
 account serves it. iCalendar UIDs are globally unique, so the same non-null
 `ical_uid` from two sources is the same event and only one copy reaches the
-board. **The server-side copy wins**, because it stays fresh when nobody opens
-the app, which is exactly why ADR 0002 kept it. Deduplication happens at master
-granularity so a recurring series is never split across sources, and a null
-`ical_uid` is never deduplicated against anything.
+board.
+
+**The most recently modified copy wins** (owner's direction, 2026-09-23).
+Which source is more trustworthy is not a fixed property of the source: an
+event is edited wherever the household keeps it, so a phone-held entry gets
+edited on the phone and a server-held one through its own account. Preferring
+one source wholesale would show a stale copy of whichever half was edited
+elsewhere. `remote_updated_at` answers the question directly.
+
+Source kind breaks a tie, and then the server-side copy wins because it stays
+fresh when nobody opens the app. **That tie-break carries more weight than it
+looks: Android does not expose a last-modified date for calendar events at
+all**, so until a phone can supply one, an Android-only household falls back to
+it for every event. iOS does expose it (`lastModifiedDate`), so this improves
+on its own when `N19` lands.
+
+Deduplication happens at master granularity so a recurring series is never
+split across sources, and a null `ical_uid` is never deduplicated against
+anything.
 
 ### Verified against a running server
 
@@ -153,10 +168,18 @@ log for the whole cycle is one line.
 
 ### Carried into phase 3
 
-- **Body size.** `MAX_JSON_BODY_BYTES` is 1 MB and bites at roughly 4000 events,
-  before the schema's 5000-per-calendar cap. A 400-day window for a busy
-  household can hit `413`. It fails loudly, but phase 3 must either chunk by
-  window or raise the cap for this route. Decide before writing the client.
+- **Body size: chunk by window** (owner's direction, 2026-09-23), and phase 2
+  was amended to make that safe. `MAX_JSON_BODY_BYTES` stays at 1 MB and bites
+  around 4000 events; the client slices its window into pushes that fit.
+
+  Chunking did not work against the contract as first built. Reconciliation
+  cancelled anything absent from a push *anywhere* in the calendar, so a client
+  sending June and then July would have had July's push cancel June. That is a
+  silent data-loss bug that only appears on a household busy enough to need
+  chunking — exactly the household least able to diagnose it.
+  `commitCalendarEvents` now takes the pushed window and only reconciles inside
+  it: a slice says nothing about events outside itself. Within its own slice a
+  chunk still reconciles fully, so deletions still work.
 - **Selection does not backfill.** The board stays empty until the next push,
   because `syncNow()` is a no-op for a phone source. The app must push when the
   parent changes a selection.

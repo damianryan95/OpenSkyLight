@@ -391,6 +391,38 @@ END:VCALENDAR
   }) as unknown as typeof fetch
 }
 
+describe('a window too large for one request body', () => {
+  it('reconciles only the slice a chunk describes, so later chunks are not cancelled by earlier ones', async () => {
+    const h = harness()
+    const sourceId = await phoneSource(h)
+    await h.call('POST', `/api/v1/calendar-sources/${sourceId}/push`, push('2026-06-10T09:00:00Z', []))
+    await select(h, sourceId)
+
+    const june = { start: '2026-06-01T00:00:00Z', end: '2026-06-16T00:00:00Z' }
+    const july = { start: '2026-06-16T00:00:00Z', end: '2026-07-01T00:00:00Z' }
+    const early = phoneEvent({ sourceEventId: 'early', title: 'Early', startAt: '2026-06-05T09:00:00Z', endAt: '2026-06-05T10:00:00Z' })
+    const late = phoneEvent({ sourceEventId: 'late', title: 'Late', startAt: '2026-06-20T09:00:00Z', endAt: '2026-06-20T10:00:00Z' })
+
+    const chunk = (pushedAt: string, window: { start: string; end: string }, events: unknown[]) =>
+      h.call('POST', `/api/v1/calendar-sources/${sourceId}/push`, {
+        pushedAt, window, calendars: [{ sourceCalendarId: 'phone:1', name: 'Personal', color: '#2F8FED', events }]
+      })
+
+    expect((await chunk('2026-06-10T10:00:00Z', june, [early])).status).toBe(200)
+    expect((await chunk('2026-06-10T10:00:01Z', july, [late])).status).toBe(200)
+
+    // The second chunk says nothing about June, so it must not cancel June's
+    // event. Reconciling the whole calendar per chunk would leave only 'Late'.
+    expect(createEventFeedService(h.db.sqlite).family(WINDOW).map((occurrence) => occurrence.title)).toEqual(['Early', 'Late'])
+
+    // Within its own slice a chunk still reconciles: dropping 'Early' from a
+    // later June chunk removes it, and leaves July alone.
+    expect((await chunk('2026-06-10T10:00:02Z', june, [])).status).toBe(200)
+    expect(createEventFeedService(h.db.sqlite).family(WINDOW).map((occurrence) => occurrence.title)).toEqual(['Late'])
+    h.db.close()
+  })
+})
+
 describe('phone and server-side sources pointing at the same calendar', () => {
   it('shows one occurrence, and it is the server-side copy', async () => {
     const h = harness({ fetcher: caldavFetcher() })
@@ -421,6 +453,36 @@ describe('phone and server-side sources pointing at the same calendar', () => {
     // server-side one, which stays fresh when nobody opens the app, is shown.
     expect(h.db.sqlite.prepare('SELECT count(*) AS count FROM events WHERE ical_uid = ?').get(SHARED_UID)).toEqual({ count: 2 })
     expect(occurrences.map((occurrence) => occurrence.title)).toEqual(['Dinner (CalDAV)', 'School run'])
+    h.db.close()
+  })
+
+  it('shows the phone copy once it is the more recently edited one', async () => {
+    const h = harness({ fetcher: caldavFetcher() })
+    const caldav = JSON.parse((await h.call('POST', '/api/v1/calendar-sources', {
+      kind: 'caldav', name: 'iCloud', baseUrl: 'https://caldav.example.test/', username: 'alice', password: 'app-password'
+    })).body) as { id: string }
+    const collections = JSON.parse((await h.call('GET', `/api/v1/calendar-sources/${caldav.id}/calendars`)).body) as { calendars: { id: string; name: string; color: string }[] }
+    await h.call('PUT', `/api/v1/calendar-sources/${caldav.id}/calendars`, {
+      calendar: { ...collections.calendars[0]!, primary: false, readOnly: false }, selected: true, audiencePersonId: null
+    })
+    await h.sources.syncSource(caldav.id)
+    // The server-side copy was last touched a week ago.
+    h.db.sqlite.prepare('UPDATE events SET remote_updated_at = ? WHERE ical_uid = ?').run('2026-06-01T00:00:00.000Z', SHARED_UID)
+
+    // Then a parent edits that event on the phone that holds the calendar.
+    const phone = await phoneSource(h)
+    await h.call('POST', `/api/v1/calendar-sources/${phone}/push`, push('2026-06-10T09:00:00Z', []))
+    await select(h, phone)
+    await h.call('POST', `/api/v1/calendar-sources/${phone}/push`, push('2026-06-10T10:00:00Z', [
+      phoneEvent({
+        sourceEventId: 'phone-dinner', icalUid: SHARED_UID, title: 'Dinner (edited on the phone)',
+        startAt: '2026-06-15T18:00:00Z', endAt: '2026-06-15T19:00:00Z', remoteUpdatedAt: '2026-06-09T20:00:00Z'
+      })
+    ]))
+
+    // Which source is fresher is a property of the event, not of the source.
+    expect(createEventFeedService(h.db.sqlite).family(WINDOW).map((occurrence) => occurrence.title))
+      .toEqual(['Dinner (edited on the phone)'])
     h.db.close()
   })
 

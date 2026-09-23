@@ -278,7 +278,10 @@ export function createCalendarSourceService(
 
         if (selected) {
           options.status?.start(calendarId)
-          const result = commitCalendarEvents(sqlite, calendarId, calendar.events.map(toCachedEvent), timestamp)
+          // Scoped to the pushed window: a phone slices a large window into
+          // several pushes to stay under the body limit, and a slice says
+          // nothing about the events outside it.
+          const result = commitCalendarEvents(sqlite, calendarId, calendar.events.map(toCachedEvent), timestamp, { start: isoUtc(fromIso(payload.window.start)), end: isoUtc(fromIso(payload.window.end)) })
           changed = changed || result.changed
           committedCalendarIds.push(calendarId)
         }
