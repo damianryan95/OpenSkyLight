@@ -2,7 +2,13 @@ import { StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import App from './App'
+import { captureEnrolmentCodeFromLocation } from './api/pendingEnrolment'
 import './styles.css'
+
+// Before React renders, and before anything can navigate: the screen's QR is a
+// URL, so an ordinary phone camera opens `/admin/#enrol=…` here. The code is
+// lifted into memory and scrubbed out of the address bar in one step.
+captureEnrolmentCodeFromLocation()
 
 // the companion follows the phone's own theme (the kiosk follows the sun)
 const darkQuery = window.matchMedia('(prefers-color-scheme: dark)')

@@ -1,3 +1,4 @@
+import { z } from 'zod'
 import type { IpcChannel, IpcContract, IpcResult } from '@shared/ipc/contract'
 import { apiContract, serverEventSchema, syncStatusEventSchema, type ServerEvent, type SyncStatus } from '@shared/api/contract'
 import { isCelebrationForDisplay } from '@shared/celebration'
@@ -30,6 +31,64 @@ export function adoptDisplayBootstrap(): void {
 
 export function displayCredential(): string | null { return localStorage.getItem(DISPLAY_CREDENTIAL_KEY) }
 export function displayId(): string | null { return localStorage.getItem(DISPLAY_ID_KEY) }
+
+/** The single storage scheme for a display's identity. Enrolment (ADR 0006)
+ * and the legacy bootstrap fragment both land here and nowhere else. */
+export function persistDisplayCredential(credential: string, id: string): void {
+  localStorage.setItem(DISPLAY_CREDENTIAL_KEY, credential)
+  localStorage.setItem(DISPLAY_ID_KEY, id)
+}
+
+/**
+ * Screen-initiated enrolment (ADR 0006).  These two routes are the only
+ * unauthenticated calls a display makes, and the `K03` ruling permits them
+ * narrowly: the screen asks to be adopted, it does not adopt itself.
+ */
+const enrolmentCodeSchema = z.object({
+  code: z.string().min(1),
+  pollToken: z.string().min(1),
+  expiresAt: z.string().min(1)
+})
+/** Only the fields the screen shows. Anything else the server sends is ignored
+ * rather than made a parse failure on a wall with no keyboard. */
+const enrolmentDisplaySchema = z.object({ id: z.string().min(1), name: z.string().min(1) })
+const enrolmentClaimSchema = z.discriminatedUnion('status', [
+  z.object({ status: z.literal('pending') }),
+  z.object({ status: z.literal('expired') }),
+  z.object({ status: z.literal('adopted'), credential: z.string().min(1), display: enrolmentDisplaySchema })
+])
+
+export type EnrolmentCodeGrant = z.infer<typeof enrolmentCodeSchema>
+export type EnrolmentClaim = z.infer<typeof enrolmentClaimSchema>
+
+/** The grant's `pollToken` is a secret: it is returned to the caller for use in
+ * a ref, and must never be rendered, stored or logged. */
+export async function requestEnrolmentCode(signal?: AbortSignal): Promise<EnrolmentCodeGrant> {
+  const response = await fetch('/api/v1/display/enrolment-code', {
+    method: 'POST',
+    // The route demands a JSON content type even with nothing to send: it is
+    // what denies a hostile page the CORS-simple request that needs no preflight.
+    headers: { Accept: 'application/json', 'Content-Type': 'application/json' },
+    body: '{}',
+    cache: 'no-store',
+    signal
+  })
+  // Never surface a remote body: it can echo credentials.
+  if (!response.ok) throw new BrowserIpcError('enrolment_unavailable', `Enrolment code request failed (${response.status})`)
+  return enrolmentCodeSchema.parse(await response.json())
+}
+
+export async function claimEnrolment(pollToken: string, signal?: AbortSignal): Promise<EnrolmentClaim> {
+  const response = await fetch('/api/v1/display/enrolment-code/claim', {
+    method: 'POST',
+    headers: { Accept: 'application/json', 'Content-Type': 'application/json' },
+    body: JSON.stringify({ pollToken }),
+    cache: 'no-store',
+    signal
+  })
+  if (!response.ok) throw new BrowserIpcError('enrolment_unavailable', `Enrolment claim failed (${response.status})`)
+  return enrolmentClaimSchema.parse(await response.json())
+}
 
 /** Fetch assigned celebration bytes with the display credential, never in a URL. */
 /** Display media needs a Bearer credential, which an <img src> cannot send, so

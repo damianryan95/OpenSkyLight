@@ -26,7 +26,7 @@ describe('server SQLite database', () => {
     expect(first.sqlite.pragma('journal_mode', { simple: true })).toBe('wal')
     expect(first.sqlite.pragma('foreign_keys', { simple: true })).toBe(1)
     expect(first.sqlite.pragma('busy_timeout', { simple: true })).toBe(5000)
-    expect(first.sqlite.prepare("SELECT count(*) AS count FROM sqlite_master WHERE type = 'table'").get()).toMatchObject({ count: 22 })
+    expect(first.sqlite.prepare("SELECT count(*) AS count FROM sqlite_master WHERE type = 'table'").get()).toMatchObject({ count: 23 })
     first.close()
 
     const second = openServerDatabase(path)

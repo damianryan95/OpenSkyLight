@@ -1,6 +1,8 @@
 import { useState, type FormEvent } from 'react'
 import { ApiError, connectToHousehold, getApiBaseUrl, type ParentAuthStatus } from '../api/client'
 import { Card, PrimaryButton } from '../components/ui'
+import { AddScreenFlow } from './AddScreenFlow'
+import { scannerAvailable } from '../api/enrolmentScanner'
 
 const DEFAULT_ADDRESS = 'http://openskylight.local:3000'
 
@@ -21,6 +23,10 @@ export function PairingScreen({ onPaired }: { onPaired: (status: ParentAuthStatu
   const [pin, setPin] = useState('')
   const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
+  // The second parent's phone has no reason to know the household's address, and
+  // asking them to read one off a wall is the failure ADR 0006 exists to remove.
+  // Scanning a screen supplies the address and adds that screen in one go.
+  const [scanning, setScanning] = useState(false)
   const isValid = address.trim().length > 0 && name.trim().length > 0 && /^\d{4,64}$/.test(pin)
 
   const submit = async (event: FormEvent) => {
@@ -39,6 +45,16 @@ export function PairingScreen({ onPaired }: { onPaired: (status: ParentAuthStatu
     }
   }
 
+  if (scanning) {
+    return (
+      <main className="mx-auto flex min-h-full w-full max-w-md items-center p-5" style={{ paddingTop: 'max(1.25rem, env(safe-area-inset-top))', paddingBottom: 'max(1.25rem, env(safe-area-inset-bottom))' }}>
+        <div className="w-full">
+          <AddScreenFlow onPaired={onPaired} onClose={() => setScanning(false)} />
+        </div>
+      </main>
+    )
+  }
+
   return (
     <main className="mx-auto flex min-h-full w-full max-w-md items-center p-5" style={{ paddingTop: 'max(1.25rem, env(safe-area-inset-top))', paddingBottom: 'max(1.25rem, env(safe-area-inset-bottom))' }}>
       <Card className="w-full p-6">
@@ -47,6 +63,19 @@ export function PairingScreen({ onPaired }: { onPaired: (status: ParentAuthStatu
         <p className="mt-3 text-base leading-6 text-ink-soft">
           This app talks to the OpenSkyLight box in your own home. It needs to know where that box is, and your household PIN to prove you are allowed in.
         </p>
+
+        {scannerAvailable() && (
+          <div className="mt-5 rounded-xl bg-paper-deep p-4">
+            <p className="text-base leading-6 font-bold">Standing in front of a screen?</p>
+            <p className="mt-1 text-sm leading-5 text-ink-soft">
+              If a screen in your home is showing a square OpenSkyLight code, scanning it tells this phone where the box is — so you only need the household PIN, not the address.
+            </p>
+            <button type="button" className="pressable mt-3 min-h-12 w-full rounded-xl bg-ember px-4 text-base font-extrabold text-white" onClick={() => setScanning(true)}>
+              Scan a screen instead
+            </button>
+          </div>
+        )}
+
         <form className="mt-6 space-y-5" onSubmit={submit} noValidate>
           <label className="block">
             <span className="mb-2 block text-sm font-extrabold text-ink-soft">Household server address</span>

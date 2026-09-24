@@ -1,5 +1,5 @@
 import { Capacitor } from '@capacitor/core'
-import type { PairedParentDeviceDto, ParentDeviceDto, PairParentDeviceRequest } from '@shared/api/contract'
+import type { DisplayDevice, PairedParentDeviceDto, ParentDeviceDto, PairParentDeviceRequest } from '@shared/api/contract'
 import type { IpcChannel, IpcContract, IpcResult } from '@shared/ipc/contract'
 import { clearPhoneCalendarState, setPairedDeviceName } from './phoneCalendarStorage'
 
@@ -204,6 +204,47 @@ export function parentUpload<T>(path: string, file: File): Promise<T> {
 
 export function getParentAuthStatus(): Promise<ParentAuthStatus> {
   return parentRequest<ParentAuthStatus>('/api/v1/auth/status')
+}
+
+/**
+ * Ask a household this phone is *not* paired with whether it has been set up
+ * yet. Scanning a screen hands over an address before there is any credential
+ * to use against it, and the answer decides between "enter the PIN" and "this
+ * household has never been claimed" — two situations with nothing in common
+ * except that both look like a failed request if they are not told apart.
+ *
+ * Deliberately not `parentRequest`: there is nothing to authenticate with, and
+ * a 401 here must not clear the credential this phone holds for some *other*
+ * household it is still correctly paired to.
+ */
+export async function probeHousehold(address: string, signal?: AbortSignal): Promise<ParentAuthStatus> {
+  const base = normalizeServerAddress(address)
+  const response = await fetch(`${base}/api/v1/auth/status`, {
+    headers: { Accept: 'application/json' },
+    credentials: 'omit',
+    signal
+  })
+  if (!response.ok) {
+    throw new ApiError(response.status, 'request_failed', 'That address answered, but not as an OpenSkyLight household')
+  }
+  return (await response.json()) as ParentAuthStatus
+}
+
+/**
+ * Redeem a screen's enrolment code (ADR 0006). Parent-authenticated, so the
+ * bearer credential or the browser session carries it.
+ *
+ * No credential comes back. The screen collects its own by polling, which is
+ * the whole point of inverting the ceremony: nothing secret ever has to travel
+ * from this phone to a device with no keyboard.
+ */
+export function enrolDisplay(code: string, name: string, signal?: AbortSignal): Promise<DisplayDevice> {
+  return parentRequest<DisplayDevice>('/api/v1/displays/enrol', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ code, name }),
+    signal
+  }, true)
 }
 
 async function submitPin(path: '/api/v1/auth/setup' | '/api/v1/auth/login', pin: string): Promise<ParentAuthStatus> {

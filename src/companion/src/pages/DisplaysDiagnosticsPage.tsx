@@ -2,6 +2,8 @@ import { useEffect, useState, type FormEvent } from 'react'
 import type { DisplayDevice, ParentDeviceDto, RegisteredDisplay, SyncStatus } from '@shared/api/contract'
 import { ApiError, listParentDevices, parentGet, parentMutation, revokeParentDevice } from '../api/client'
 import { Card, EmptyNote, GhostButton, PrimaryButton, TextInput } from '../components/ui'
+import { AddScreenFlow } from './AddScreenFlow'
+import { clearPendingEnrolmentCode, peekPendingEnrolmentCode } from '../api/pendingEnrolment'
 import { DEFAULT_HOME_LAYOUT, findFreeSpot, sanitizeLayout, TILE_SPECS } from '@shared/home'
 import type { HomeTile, HomeTileType } from '@shared/types'
 
@@ -11,7 +13,14 @@ export function DisplaysDiagnosticsPage({ onUnpair }: { onUnpair?: () => void } 
   const [displays, setDisplays] = useState<DisplayDevice[]>([])
   const [sync, setSync] = useState<SyncStatus | null>(null)
   const [error, setError] = useState<string | null>(null)
-  const [adding, setAdding] = useState(false)
+  // A code the parent's ordinary camera app put in the address bar. Taken once,
+  // on mount, so a later remount cannot try to spend something already gone.
+  const [pendingCode] = useState(() => peekPendingEnrolmentCode())
+  useEffect(() => clearPendingEnrolmentCode(), [])
+  // Two ceremonies, deliberately. Scanning is the one a wall-mounted screen can
+  // actually complete (ADR 0006); the enrolment link stays for a screen with a
+  // keyboard, and because a household that installs nothing still has it.
+  const [adding, setAdding] = useState<'none' | 'scan' | 'link'>(pendingCode === null ? 'none' : 'scan')
   const load = async () => {
     try {
       const [deviceResult, syncResult] = await Promise.all([
@@ -24,9 +33,11 @@ export function DisplaysDiagnosticsPage({ onUnpair }: { onUnpair?: () => void } 
   useEffect(() => { void load() }, [])
   return <div className="mt-4 space-y-5">
     {error && <ErrorNote>{error}</ErrorNote>}
-    <section aria-labelledby="displays-heading"><div className="mb-2 flex items-center justify-between gap-2"><div><h3 id="displays-heading" className="font-display text-xl font-semibold">Displays</h3><p className="text-sm font-semibold text-ink-faint">Each screen has its own name and display settings.</p></div><GhostButton onClick={() => setAdding(true)}>Register display</GhostButton></div>
-      {adding && <RegisterDisplay onDone={async () => { setAdding(false); await load() }} onCancel={() => setAdding(false)} />}
-      {displays.length === 0 && !adding ? <EmptyNote>No displays are registered yet.</EmptyNote> : displays.map((display) => <DisplayCard key={display.id} display={display} onChanged={load} />)}
+    <section aria-labelledby="displays-heading"><div className="mb-2"><h3 id="displays-heading" className="font-display text-xl font-semibold">Displays</h3><p className="text-sm font-semibold text-ink-faint">Each screen has its own name and display settings.</p></div>
+      {adding === 'none' && <div className="mb-3 space-y-2"><div className="flex flex-wrap gap-2"><PrimaryButton onClick={() => setAdding('scan')}>Add a screen</PrimaryButton><GhostButton onClick={() => setAdding('link')}>Register display</GhostButton></div><p className="text-sm leading-5 text-ink-faint">Add a screen reads the code the screen itself is showing. Register display makes a private link you have to open on that screen, which only helps if it has a keyboard.</p></div>}
+      {adding === 'scan' && <AddScreenFlow initialCode={pendingCode} onEnrolled={load} onClose={() => setAdding('none')} />}
+      {adding === 'link' && <RegisterDisplay onDone={async () => { setAdding('none'); await load() }} onCancel={() => setAdding('none')} />}
+      {displays.length === 0 && adding === 'none' ? <EmptyNote>No displays are registered yet.</EmptyNote> : displays.map((display) => <DisplayCard key={display.id} display={display} onChanged={load} />)}
     </section>
     <ParentPhones />
     <Diagnostics sync={sync} onRefresh={load} />

@@ -55,6 +55,33 @@ export const pairParentDeviceRequestSchema = z.object({
 }).strict()
 export const pairedParentDeviceSchema = parentDeviceSchema.extend({ credential: z.string().min(1) })
 
+/**
+ * Screen-initiated enrolment (ADR 0006). The minting response is the only place
+ * `pollToken` ever appears: it is what proves a caller is the screen that asked
+ * to be adopted, so it is never rendered, never in the QR, and never in a URL.
+ * `code` is the opposite — it is shown on a wall and is public by construction.
+ */
+export const enrolmentCodeSchema = z.object({
+  code: z.string().min(1).max(32),
+  pollToken: z.string().min(1),
+  expiresAt: z.string().datetime()
+}).strict()
+
+export const claimEnrolmentRequestSchema = z.object({ pollToken: z.string().min(1).max(400) }).strict()
+
+/** `adopted` carries the credential exactly once; a repeat claim reports `expired`. */
+export const claimEnrolmentResponseSchema = z.discriminatedUnion('status', [
+  z.object({ status: z.literal('pending') }).strict(),
+  z.object({ status: z.literal('expired') }).strict(),
+  z.object({ status: z.literal('adopted'), credential: z.string().min(1), display: displayDeviceSchema }).strict()
+])
+
+/** Redeemed by a parent's phone after scanning. The code is normalised server-side. */
+export const enrolDisplayRequestSchema = z.object({
+  code: z.string().min(1).max(64),
+  name: z.string().min(1).max(120)
+}).strict()
+
 /** A display may submit a date, but the server compares it to household today. */
 export const displayChoreCommandRequestSchema = z.object({
   dueDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'dueDate must be an ISO calendar date')
@@ -346,6 +373,10 @@ export type RegisteredDisplay = z.infer<typeof registeredDisplaySchema>
 export type ParentDeviceDto = z.infer<typeof parentDeviceSchema>
 export type PairedParentDeviceDto = z.infer<typeof pairedParentDeviceSchema>
 export type PairParentDeviceRequest = z.infer<typeof pairParentDeviceRequestSchema>
+export type EnrolmentCode = z.infer<typeof enrolmentCodeSchema>
+export type ClaimEnrolmentRequest = z.infer<typeof claimEnrolmentRequestSchema>
+export type ClaimEnrolmentResponse = z.infer<typeof claimEnrolmentResponseSchema>
+export type EnrolDisplayRequest = z.infer<typeof enrolDisplayRequestSchema>
 export type PersonDto = z.infer<typeof personSchema>
 export type CalendarSourceDto = z.infer<typeof calendarSourceSchema>
 export type DiscoveredCalendarDto = z.infer<typeof discoveredCalendarSchema>

@@ -1,8 +1,8 @@
 import type { IncomingMessage, ServerResponse } from 'node:http'
 import { z } from 'zod'
 import { DateTime } from 'luxon'
-import { addListItemRequestSchema, apiContract, apiInfoResponseSchema, choreCorrectionRequestSchema, connectCalDavRequestSchema, connectIcsRequestSchema, connectPhoneRequestSchema, pushPhoneCalendarsConflictSchema, pushPhoneCalendarsRequestSchema, pushPhoneCalendarsResponseSchema, setCalendarSelectionRequestSchema, createChoreRequestSchema, createListRequestSchema, createPersonRequestSchema, createRewardRequestSchema, displayChoreCommandRequestSchema, mealRangeRequestSchema, mealSlotKindSchema, pairParentDeviceRequestSchema, redeemRewardRequestSchema, registerDisplayRequestSchema, setMealRequestSchema, setMealTemplateRequestSchema, starAdjustmentRequestSchema, updateChoreRequestSchema, updateDisplayRequestSchema, updateHouseholdSettingsRequestSchema, updateListRequestSchema, updatePersonRequestSchema, updateRewardRequestSchema } from '../../shared/api/contract'
-import { AuthError, CSRF_HEADER, DisplayDeviceService, HouseholdAuthService, ParentDeviceService, PARENT_SESSION_COOKIE } from '../auth'
+import { addListItemRequestSchema, apiContract, apiInfoResponseSchema, choreCorrectionRequestSchema, claimEnrolmentRequestSchema, claimEnrolmentResponseSchema, connectCalDavRequestSchema, connectIcsRequestSchema, connectPhoneRequestSchema, displayDeviceSchema, enrolDisplayRequestSchema, enrolmentCodeSchema, pushPhoneCalendarsConflictSchema, pushPhoneCalendarsRequestSchema, pushPhoneCalendarsResponseSchema, setCalendarSelectionRequestSchema, createChoreRequestSchema, createListRequestSchema, createPersonRequestSchema, createRewardRequestSchema, displayChoreCommandRequestSchema, mealRangeRequestSchema, mealSlotKindSchema, pairParentDeviceRequestSchema, redeemRewardRequestSchema, registerDisplayRequestSchema, setMealRequestSchema, setMealTemplateRequestSchema, starAdjustmentRequestSchema, updateChoreRequestSchema, updateDisplayRequestSchema, updateHouseholdSettingsRequestSchema, updateListRequestSchema, updatePersonRequestSchema, updateRewardRequestSchema } from '../../shared/api/contract'
+import { AuthError, CSRF_HEADER, DisplayDeviceService, DisplayEnrolmentService, HouseholdAuthService, ParentDeviceService, PARENT_SESSION_COOKIE } from '../auth'
 import { type ChoresRewardsService, type DisplayReadService, type HouseholdSettingsService, type ListsDomain, type MealsDomain, type PeopleService, type MediaService } from '../domain'
 import { createReadStream } from 'node:fs'
 import type { EventStream, EventStreamAuthenticator } from '../events'
@@ -18,6 +18,7 @@ export interface ApiRouterDependencies {
   eventStreamAuthenticator?: EventStreamAuthenticator
   auth?: HouseholdAuthService
   displays?: DisplayDeviceService
+  displayEnrolment?: DisplayEnrolmentService
   parentDevices?: ParentDeviceService
   chores?: ChoresRewardsService
   settings?: HouseholdSettingsService
@@ -465,6 +466,49 @@ export async function handleApiRequest(request: IncomingMessage, response: Serve
       throw new ApiRequestError(405, 'method_not_allowed', `Method ${method} is not allowed`)
     }
 
+    // Screen-initiated enrolment (ADR 0006). Kept ahead of `/api/v1/displays/:id`
+    // so `enrol` is not read as a display id.
+    if (path === '/api/v1/display/enrolment-code' || path === '/api/v1/display/enrolment-code/claim' || path === '/api/v1/displays/enrol') {
+      if (method !== 'POST') throw new ApiRequestError(405, 'method_not_allowed', `Method ${method} is not allowed`)
+      if (dependencies.displayEnrolment === undefined) throw new ApiRequestError(503, 'service_unavailable', 'Display enrolment is unavailable')
+      const enrolment = dependencies.displayEnrolment
+      // JSON is demanded for the same reason phone pairing demands it: it denies
+      // a hostile page the CORS-simple request that would otherwise let it drive
+      // these endpoints from a browser with no preflight.
+      assertJsonContentType(request)
+
+      if (path === '/api/v1/display/enrolment-code') {
+        // Deliberately unauthenticated. This is the one display-initiated write
+        // channel K03 permits, and ADR 0006 rules on it explicitly rather than
+        // leaving it to be found: it runs before the screen is registered, it
+        // writes no household data, and it mints nothing of value on its own.
+        // The code is inert until a parent redeems it, and the credential that
+        // redemption produces is released only against the poll token, which
+        // exists solely in this response. Rate-limited per client address.
+        sendJson(response, 201, enrolmentCodeSchema.parse(enrolment.mint(clientAddress(request))))
+        return true
+      }
+
+      if (path === '/api/v1/display/enrolment-code/claim') {
+        // Unauthenticated by necessity — the caller has no credential yet, which
+        // is the whole point. The poll token in the *body* is the authentication,
+        // and it stays in the body so neither secret ever reaches a query string,
+        // an access log or server-rendered history.
+        const { pollToken } = await readJsonBody(request, claimEnrolmentRequestSchema)
+        sendJson(response, 200, claimEnrolmentResponseSchema.parse(enrolment.claim(pollToken)))
+        return true
+      }
+
+      // Parent authenticated over either the cookie or the N17 bearer path.
+      requireParentMutation(dependencies, request)
+      const input = await readJsonBody(request, enrolDisplayRequestSchema)
+      // Parsed through the credential-free display schema on purpose: the
+      // credential belongs to the screen, collected through claim, and must not
+      // reach the phone that adopted it.
+      sendJson(response, 201, displayDeviceSchema.parse(enrolment.redeem(input.code, input.name, clientAddress(request))))
+      return true
+    }
+
     if (path === '/api/v1/displays') {
       if (method === 'GET') {
         requireParentRead(dependencies, request)
@@ -774,6 +818,15 @@ function currentHouseholdDate(settings: HouseholdSettingsService, now: (() => Da
   const date = DateTime.fromJSDate((now ?? (() => new Date()))()).setZone(settings.get().timezone).toISODate()
   if (date === null) throw new ApiRequestError(500, 'internal_error', 'Unable to determine household date')
   return date
+}
+
+/**
+ * The peer address as the OS reports it. Deliberately not `x-forwarded-for`:
+ * that header is caller-supplied, so trusting it would let anyone who can set a
+ * header walk straight past a per-address rate limit.
+ */
+function clientAddress(request: IncomingMessage): string {
+  return request.socket?.remoteAddress ?? 'unknown'
 }
 
 function readHeader(request: IncomingMessage, name: string): string | undefined {

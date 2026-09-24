@@ -324,6 +324,24 @@ const migrations: readonly string[] = [
   // otherwise resurrect events a newer one had already reconciled away.
   `
     ALTER TABLE calendars ADD COLUMN last_pushed_at TEXT;
+  `,
+
+  // 012 - screen-initiated enrolment (ADR 0006). An unregistered screen mints a
+  // row here and shows its code as a QR on a wall, so the code is public by
+  // construction. Two secrets guard the row and only their digests are stored:
+  // the short human-readable code a parent redeems, and a high-entropy poll
+  // token that never leaves the minting screen and is the only thing that can
+  // collect the resulting display credential.
+  `
+    CREATE TABLE display_enrolment_codes (
+      id TEXT PRIMARY KEY,
+      code_hash BLOB NOT NULL UNIQUE,
+      poll_token_hash BLOB NOT NULL UNIQUE,
+      created_at TEXT NOT NULL,
+      expires_at TEXT NOT NULL,
+      redeemed_at TEXT,
+      display_id TEXT REFERENCES devices(id) ON DELETE CASCADE
+    );
   `
 ]
 

@@ -32,8 +32,10 @@
     "test:phone-planning": "npm run build:companion && node scripts/e2e-phone-planning.mjs",
     "test:phone-displays": "npm run build:companion && node scripts/e2e-phone-displays-diagnostics.mjs",
     "test:app-pairing": "npm run build:app && node scripts/e2e-app-pairing.mjs",
+    "test:screen-enrolment": "npm run build:app && node scripts/e2e-phone-screen-enrolment.mjs",
     "test:kiosk-browser": "npm run build:kiosk && npm run build:server && node scripts/e2e-kiosk-browser.mjs",
     "test:kiosk-connectivity": "npm run build:kiosk && npm run build:server && node scripts/e2e-kiosk-connectivity.mjs",
+    "test:kiosk-enrolment": "npm run build:kiosk && npm run build:server && node scripts/e2e-kiosk-enrolment.mjs",
     "test:operations": "node ./node_modules/vitest/vitest.mjs run tests/unit/operations.test.ts",
     "test:multi-display": "npm run build:kiosk && npm run build:server && node scripts/e2e-multi-display.mjs",
     "screenshots:personalization": "node scripts/capture-personalization-prototype.mjs",
@@ -51,6 +53,7 @@
   },
   "devDependencies": {
     "@capacitor/android": "^8.5.2",
+    "@capacitor/barcode-scanner": "^3.1.2",
     "@capacitor/cli": "^8.5.2",
     "@capacitor/core": "^8.5.2",
     "@ebarooni/capacitor-calendar": "^8.7.0",

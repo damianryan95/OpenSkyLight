@@ -6,6 +6,28 @@ const SESSION_LIFETIME_MS = 8 * 60 * 60 * 1000
 const BACKOFF_START_AFTER_FAILURES = 3
 const MAX_BACKOFF_MS = 15 * 60 * 1000
 
+/**
+ * Crockford base32 — I, L, O and U are absent, so a parent reading a code off a
+ * wall display cannot confuse it with 1, 0 or a rude word. The excluded letters
+ * are folded back to their digits on the way in rather than rejected.
+ */
+const ENROLMENT_CODE_ALPHABET = '0123456789ABCDEFGHJKMNPQRSTVWXYZ'
+const ENROLMENT_CODE_LENGTH = 8
+const ENROLMENT_CODE_LIFETIME_MS = 5 * 60 * 1000
+/** How long an adopted display's credential waits for its screen to collect it. */
+const ENROLMENT_COLLECTION_WINDOW_MS = 5 * 60 * 1000
+/** Dead codes are swept long after they can matter, so the table stays bounded. */
+const ENROLMENT_ROW_RETENTION_MS = 24 * 60 * 60 * 1000
+const ENROLMENT_MINT_LIMIT = 30
+const ENROLMENT_REDEEM_FAILURE_LIMIT = 10
+const ENROLMENT_RATE_WINDOW_MS = 10 * 60 * 1000
+/**
+ * The single refusal for every unusable code: never minted, expired, already
+ * redeemed, or malformed. A caller that could tell those apart could probe the
+ * code space for live codes, so they are deliberately one answer.
+ */
+const ENROLMENT_REFUSAL = 'That enrolment code was not accepted. Ask the screen to show a new code.'
+
 export const PARENT_SESSION_COOKIE = 'osl_parent_session'
 export const CSRF_HEADER = 'x-osl-csrf-token'
 
@@ -55,6 +77,20 @@ export interface PairedParentDevice extends ParentDevice {
   /** Returned exactly once, to the PIN-authenticated pairing caller. */
   credential: string
 }
+
+/** Minted by a screen that has no credential yet. Only `code` may be displayed. */
+export interface MintedEnrolmentCode {
+  /** Short, human-readable, carried in the QR on a wall. Public by construction. */
+  code: string
+  /** High-entropy, returned only to the minting screen. Never displayed, never in the QR. */
+  pollToken: string
+  expiresAt: string
+}
+
+export type EnrolmentClaim =
+  | { status: 'pending' }
+  | { status: 'expired' }
+  | { status: 'adopted', credential: string, display: DisplayDevice }
 
 export interface AuthClock {
   now(): Date
@@ -280,6 +316,11 @@ export class DisplayDeviceService {
     return this.credentials.all().map(rowToDisplay)
   }
 
+  /** Reads a display by id. Like every display DTO, it omits the credential. */
+  find(id: string): DisplayDevice | undefined {
+    return this.getById(id)
+  }
+
   update(id: string, input: { name?: string, homeLayout?: unknown, themePreference?: unknown, sleepSettings?: unknown, kioskPreferences?: unknown }): DisplayDevice {
     const existing = this.getById(id)
     if (existing === undefined) throw new AuthError(401, 'unauthorized', 'Display was not found')
@@ -372,6 +413,195 @@ export class ParentDeviceService {
   }
 
   private now(): string { return this.clock.now().toISOString() }
+}
+
+/**
+ * Screen-initiated enrolment (ADR 0006): a screen with no credential asks to be
+ * adopted, shows the code it is given as a QR, and a parent's phone redeems it.
+ *
+ * The property the whole ceremony rests on is that **the QR is on a wall**.
+ * Anyone who can see the screen can photograph the code, so the code alone must
+ * never be enough to collect a display credential. Minting therefore returns
+ * two secrets: the code, which is public by construction, and a `pollToken`
+ * which is returned only to the minting screen, is never rendered and never
+ * enters the QR. A parent's redemption registers the display; the credential is
+ * released only to a caller presenting the matching poll token, exactly once.
+ * A stranger who photographs the QR can at worst get a screen adopted — which
+ * still takes a parent's authorisation — and never learns the credential.
+ *
+ * The credential between redemption and collection is held **in memory only**,
+ * never written to disk in any form. A server restart mid-ceremony therefore
+ * forfeits that adoption: the screen's next claim reports `expired`, it mints a
+ * fresh code, and the parent scans again. That is the safe failure, and it is
+ * preferred to persisting a plaintext credential for five minutes.
+ */
+export class DisplayEnrolmentService {
+  /** Enrolment row id -> the display credential awaiting its screen. */
+  private readonly pendingCredentials = new Map<string, { credential: string, collectBy: number }>()
+  private readonly mintAttempts = new AttemptWindow(ENROLMENT_MINT_LIMIT, ENROLMENT_RATE_WINDOW_MS)
+  private readonly redeemFailures = new AttemptWindow(ENROLMENT_REDEEM_FAILURE_LIMIT, ENROLMENT_RATE_WINDOW_MS)
+
+  constructor(
+    private readonly sqlite: Database.Database,
+    private readonly displays: DisplayDeviceService,
+    private readonly clock: AuthClock = systemClock
+  ) {}
+
+  /**
+   * Called by an unregistered screen, with no authentication. Rate-limited per
+   * client address so the table cannot be flooded by anything that can reach
+   * the port.
+   */
+  mint(clientAddress = 'unknown'): MintedEnrolmentCode {
+    const nowMs = this.clock.now().getTime()
+    this.mintAttempts.enforce(clientAddress, nowMs, 'Enrolment codes are being requested too quickly')
+    this.mintAttempts.record(clientAddress, nowMs)
+    this.sweep(nowMs)
+
+    const createdAt = new Date(nowMs).toISOString()
+    const expiresAt = new Date(nowMs + ENROLMENT_CODE_LIFETIME_MS).toISOString()
+    // A collision with a live code is vanishingly unlikely across 32^8, but a
+    // unique violation must retry rather than surface as a 500 to a screen.
+    for (let attempt = 0; attempt < 5; attempt += 1) {
+      const code = generateEnrolmentCode()
+      const pollToken = randomBytes(32).toString('base64url')
+      try {
+        this.sqlite.prepare(
+          'INSERT INTO display_enrolment_codes (id, code_hash, poll_token_hash, created_at, expires_at) VALUES (?, ?, ?, ?, ?)'
+        ).run(randomBytes(16).toString('hex'), hashSecret(code), hashSecret(pollToken), createdAt, expiresAt)
+      } catch (error) {
+        if (isUniqueConstraint(error)) continue
+        throw error
+      }
+      return { code, pollToken, expiresAt }
+    }
+    throw new AuthError(409, 'conflict', 'An enrolment code could not be allocated. Try again.')
+  }
+
+  /**
+   * Called by the minting screen while it polls. The credential is handed over
+   * exactly once: a second claim reports `expired`, so a captured response
+   * cannot be replayed into a second working credential.
+   */
+  claim(pollToken: string): EnrolmentClaim {
+    const nowMs = this.clock.now().getTime()
+    this.sweep(nowMs)
+    const presented = hashSecret(pollToken)
+    const row = this.sqlite.prepare(
+      'SELECT id, poll_token_hash, expires_at, redeemed_at, display_id FROM display_enrolment_codes WHERE poll_token_hash = ?'
+    ).get(presented) as { id: string, poll_token_hash: Buffer, expires_at: string, redeemed_at: string | null, display_id: string | null } | undefined
+    if (row === undefined || !safeEqual(presented, row.poll_token_hash)) return { status: 'expired' }
+
+    if (row.redeemed_at === null) {
+      return Date.parse(row.expires_at) <= nowMs ? { status: 'expired' } : { status: 'pending' }
+    }
+
+    const pending = this.pendingCredentials.get(row.id)
+    if (pending === undefined || row.display_id === null) return { status: 'expired' }
+    const display = this.displays.find(row.display_id)
+    // Revoked between adoption and collection: the credential would be inert
+    // anyway, and handing it over would only confuse the screen.
+    if (display === undefined || display.revokedAt !== null) {
+      this.pendingCredentials.delete(row.id)
+      return { status: 'expired' }
+    }
+    this.pendingCredentials.delete(row.id)
+    return { status: 'adopted', credential: pending.credential, display }
+  }
+
+  /**
+   * Called by a parent's phone after scanning. Registers the display through
+   * the ordinary `A03` path and returns it **without** the credential — that
+   * goes to the screen through `claim`, never to the phone.
+   */
+  redeem(code: string, name: string, clientAddress = 'unknown'): DisplayDevice {
+    const nowMs = this.clock.now().getTime()
+    this.redeemFailures.enforce(clientAddress, nowMs, 'Enrolment attempts are temporarily throttled')
+    // Every unusable code takes this same path — hash, indexed lookup, constant
+    // -time compare — so a malformed or unknown code costs what a stale one
+    // does and neither the message nor the timing tells them apart.
+    const presented = hashSecret(normalizeEnrolmentCode(code))
+    const row = this.sqlite.prepare(
+      'SELECT id, code_hash, expires_at, redeemed_at FROM display_enrolment_codes WHERE code_hash = ?'
+    ).get(presented) as { id: string, code_hash: Buffer, expires_at: string, redeemed_at: string | null } | undefined
+    if (row === undefined || !safeEqual(presented, row.code_hash) || row.redeemed_at !== null || Date.parse(row.expires_at) <= nowMs) {
+      this.redeemFailures.record(clientAddress, nowMs)
+      throw new AuthError(401, 'unauthorized', ENROLMENT_REFUSAL)
+    }
+
+    const registered = this.sqlite.transaction(() => {
+      const display = this.displays.register({ name })
+      // Conditioned on `redeemed_at IS NULL` so two phones racing the same code
+      // cannot both register a screen: the loser's update matches nothing and
+      // the whole transaction, registration included, rolls back.
+      const result = this.sqlite.prepare(
+        'UPDATE display_enrolment_codes SET redeemed_at = ?, display_id = ? WHERE id = ? AND redeemed_at IS NULL'
+      ).run(new Date(nowMs).toISOString(), display.id, row.id)
+      if (result.changes !== 1) throw new AuthError(401, 'unauthorized', ENROLMENT_REFUSAL)
+      return display
+    })()
+
+    this.pendingCredentials.set(row.id, { credential: registered.credential, collectBy: nowMs + ENROLMENT_COLLECTION_WINDOW_MS })
+    return this.displays.find(registered.id)!
+  }
+
+  /**
+   * Drops codes long past their expiry and credentials no screen came back for.
+   * Single-use codes are worthless once dead, and an appliance that runs for
+   * years should not accumulate them.
+   */
+  private sweep(nowMs: number): void {
+    this.sqlite.prepare('DELETE FROM display_enrolment_codes WHERE expires_at <= ?')
+      .run(new Date(nowMs - ENROLMENT_ROW_RETENTION_MS).toISOString())
+    for (const [id, pending] of this.pendingCredentials) {
+      if (pending.collectBy <= nowMs) this.pendingCredentials.delete(id)
+    }
+  }
+}
+
+/**
+ * A sliding-window attempt counter keyed by client address. In-process by
+ * design: one server owns this volume, so there is no second counter to keep in
+ * step. Deliberately not the household-wide PIN backoff — locking every screen
+ * out because one host misbehaved would be worse than the flooding it prevents.
+ */
+class AttemptWindow {
+  private readonly attempts = new Map<string, number[]>()
+
+  constructor(private readonly limit: number, private readonly windowMs: number) {}
+
+  enforce(key: string, nowMs: number, message: string): void {
+    const recent = this.recent(key, nowMs)
+    if (recent.length < this.limit) return
+    throw new AuthError(429, 'rate_limited', message, Math.max(1, Math.ceil((recent[0] + this.windowMs - nowMs) / 1000)))
+  }
+
+  record(key: string, nowMs: number): void {
+    this.attempts.set(key, [...this.recent(key, nowMs), nowMs])
+  }
+
+  private recent(key: string, nowMs: number): number[] {
+    const kept = (this.attempts.get(key) ?? []).filter((at) => at > nowMs - this.windowMs)
+    if (kept.length === 0) this.attempts.delete(key)
+    else this.attempts.set(key, kept)
+    return kept
+  }
+}
+
+function generateEnrolmentCode(): string {
+  // 32 divides 256, so a byte modulo the alphabet length is uniform.
+  let code = ''
+  for (const byte of randomBytes(ENROLMENT_CODE_LENGTH)) code += ENROLMENT_CODE_ALPHABET[byte % ENROLMENT_CODE_ALPHABET.length]
+  return code
+}
+
+/**
+ * What a parent typed, turned into what the screen showed. Spaces and hyphens a
+ * human added for readability go, and the letters Crockford base32 omits fold
+ * to the digits they are mistaken for.
+ */
+export function normalizeEnrolmentCode(code: string): string {
+  return code.trim().toUpperCase().replace(/[\s-]+/g, '').replace(/[IL]/g, '1').replace(/O/g, '0')
 }
 
 function assertPin(pin: string): void {

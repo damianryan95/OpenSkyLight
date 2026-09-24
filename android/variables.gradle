@@ -1,5 +1,11 @@
 ext {
-    minSdkVersion = 24
+    // 26, not Capacitor's default 24, because the barcode scanner N18 needs
+    // declares 26 and the manifest merger refuses to go lower. The escape hatch
+    // (tools:overrideLibrary) forces the merge and, in the merger's own words,
+    // may lead to runtime failures — a crash when a parent points the camera at
+    // a screen is worse than not supporting Android 7, which reached its end of
+    // security support years before this product existed.
+    minSdkVersion = 26
     compileSdkVersion = 36
     targetSdkVersion = 36
     androidxActivityVersion = '1.11.0'

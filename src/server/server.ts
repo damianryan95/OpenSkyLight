@@ -4,7 +4,7 @@ import { createReadStream, existsSync, statSync } from 'node:fs'
 import { extname, resolve, sep } from 'node:path'
 import { sendLiveHealth, sendReadyHealth } from './api/health'
 import { handleApiRequest } from './api/router'
-import { DisplayDeviceService, HouseholdAuthService, ParentDeviceService, PARENT_SESSION_COOKIE } from './auth'
+import { DisplayDeviceService, DisplayEnrolmentService, HouseholdAuthService, ParentDeviceService, PARENT_SESSION_COOKIE } from './auth'
 import type { ServerDatabase } from './db'
 import { createChoresRewardsService, createDisplayReadService, createHouseholdSettingsService, createListsDomain, createMealsDomain, createPeopleService, createMediaService } from './domain'
 import { EventStream, type EventStreamAuthenticator } from './events'
@@ -52,6 +52,9 @@ export function createHeadlessServer(options: HeadlessServerOptions = {}): Headl
   const auth = options.database === undefined ? undefined : new HouseholdAuthService(options.database.sqlite)
   const displays = options.database === undefined ? undefined : new DisplayDeviceService(options.database.sqlite)
   const parentDevices = options.database === undefined ? undefined : new ParentDeviceService(options.database.sqlite)
+  // Holds pending credentials in memory between adoption and collection, so it
+  // must be the one instance the routes share for the whole process lifetime.
+  const displayEnrolment = options.database === undefined || displays === undefined ? undefined : new DisplayEnrolmentService(options.database.sqlite, displays)
   const settings = options.database === undefined ? undefined : createHouseholdSettingsService(options.database.sqlite)
   const people = options.database === undefined ? undefined : createPeopleService(options.database.sqlite)
   const media = options.database === undefined || options.mediaDir === undefined ? undefined : createMediaService(options.database.sqlite, options.mediaDir)
@@ -99,7 +102,7 @@ export function createHeadlessServer(options: HeadlessServerOptions = {}): Headl
         return device === undefined ? undefined : { type: 'display' as const, id: device.id }
       }
     }),
-    ...(auth === undefined || displays === undefined || settings === undefined || chores === undefined || people === undefined || syncStatus === undefined || displayRead === undefined || lists === undefined || meals === undefined ? {} : { auth, displays, parentDevices, settings, chores, people, media, syncStatus, calendarSources, syncScheduler, rss: createRssService(), displayRead, lists, meals, icons: createOnlineIconSearchService() })
+    ...(auth === undefined || displays === undefined || settings === undefined || chores === undefined || people === undefined || syncStatus === undefined || displayRead === undefined || lists === undefined || meals === undefined ? {} : { auth, displays, displayEnrolment, parentDevices, settings, chores, people, media, syncStatus, calendarSources, syncScheduler, rss: createRssService(), displayRead, lists, meals, icons: createOnlineIconSearchService() })
   }, options.staticDir, options.companionStaticDir)
   let started: StartedHeadlessServer | undefined
 

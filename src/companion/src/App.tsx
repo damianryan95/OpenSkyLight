@@ -16,6 +16,7 @@ import {
   type ParentAuthStatus
 } from './api/client'
 import { cancelPhoneCalendarSync, startPhoneCalendarSyncTriggers } from './api/phoneCalendarSync'
+import { peekPendingEnrolmentCode } from './api/pendingEnrolment'
 import { Card, GhostButton, PrimaryButton, TextInput } from './components/ui'
 import { PeopleCalendarsPage } from './pages/PeopleCalendarsPage'
 import { ChoresRewardsAdminPage } from './pages/ChoresRewardsAdminPage'
@@ -36,7 +37,11 @@ const SECTIONS: { id: SectionId; label: string; description: string; icon: strin
 
 export default function App() {
   const [status, setStatus] = useState<ParentAuthStatus | null>(null)
-  const [section, setSection] = useState<SectionId>('home')
+  // A parent who scanned the screen's QR with their phone's own camera arrives
+  // here with the code already captured by `main.tsx`, and no idea that
+  // Displays is where it is spent. Take them there — through the PIN screen
+  // first, if the session has lapsed.
+  const [section, setSection] = useState<SectionId>(() => (peekPendingEnrolmentCode() === null ? 'home' : 'displays'))
   // Bumped when a pairing is made or dropped, purely to re-read the two stored
   // values below. They live in localStorage rather than state because the API
   // client owns them and signs every request with them.
