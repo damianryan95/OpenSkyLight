@@ -182,7 +182,7 @@ O02 --> N12
 | N13 | Retire the Google OAuth layer | done | — |
 | N14 | CalDAV and ICS calendar source | done | N13 |
 | N17 | Parent app pairing and token authentication | done | — |
-| N18 | Screen-displayed QR enrolment and household claim | planned | N17 (ADR 0006 decided) |
+| N18 | Screen-displayed QR enrolment and household claim | in progress | N17 (ADR 0006 decided) |
 | N05 | Phone-native calendar connector (Android) | in progress | N13, N17 (ADR 0005 decided) |
 | N19 | iOS app platform and verification | blocked | N05; needs a Mac |
 | N06 | Bidirectional calendar sync | planned | N05, N14 |

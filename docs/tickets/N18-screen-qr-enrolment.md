@@ -1,7 +1,56 @@
 # N18 - Screen-displayed QR enrolment and household claim
 
-Status: planned
+Status: in progress (cases 2 and 3 done and driven; case 1 blocked)
 Depends on: N17; ceremony settled by ADR 0006
+
+## Built 2026-09-24 — what works, and the one criterion that does not
+
+The ceremony exists and was driven across three real processes: a real server,
+a real kiosk in a browser, and the real companion bundle. An unregistered screen
+shows a QR and eight typeable characters, a parent redeems, and the screen
+collects its own credential and opens the board with no further interaction.
+
+**Cases 2 and 3 are done.** A paired phone adds a screen; an unpaired phone is
+handed the server address by the QR, asks only for the PIN, and pairs and enrols
+in one step.
+
+**Case 1 is blocked, and not by this ticket.** `POST /api/v1/auth/setup` still
+calls `assertSameOrigin`, which an app at `capacitor://localhost` can never
+satisfy — the same-origin blocker `N05` recorded. So a factory-fresh household
+still needs a browser once, to set the PIN, which fails this ticket's first
+acceptance criterion: *"a factory-fresh screen and a phone with the app produce
+a working, enrolled kiosk and a configured household, with no browser"*. The
+app says so plainly rather than failing obscurely.
+
+The fix is the one already proven on the pairing route in `N17`: drop the origin
+check on `setup` and require `Content-Type: application/json`, which forces a
+preflight the server never answers, so a hostile page still cannot reach it.
+Small, and it is what makes the phone-first promise true.
+
+### The security property, tested rather than argued
+
+The QR is on a wall, so its code is public. Minting therefore returns **two**
+secrets: the `code` that goes in the QR, and a `pollToken` that never leaves the
+screen. The display credential is released only against the poll token, and
+claiming with the code in its place returns the same answer as a code that never
+existed. Photographing the wall yields nothing.
+
+### Recorded for whoever touches this next
+
+- **A rotation race.** If the screen rotated its code at exactly the stated
+  expiry, a parent who redeemed a second earlier would leave a display
+  registered on the server that never collects its credential — a screen stuck
+  on a QR forever. The screen lets the *server* rule on expiry and only rotates
+  on its own clock after a grace period.
+- **A restart mid-ceremony forfeits an adoption.** The credential between
+  redemption and collection is held in memory, because writing a plaintext
+  credential to disk would be worse. The screen re-mints; the household is left
+  with one spare display row to delete.
+- **`minSdk` moved 24 → 26** for the scanner library. The override that would
+  avoid it warns of runtime failures.
+- **No real camera has scanned it.** The payload is unit-tested against the
+  exact string the kiosk emits, and manual entry is covered end to end, but a
+  lens has never been pointed at the screen.
 
 ## Context
 
