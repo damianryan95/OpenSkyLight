@@ -125,5 +125,17 @@ function explain(reason: unknown, address: string): string {
       ? 'Too many attempts have been made. Wait a minute, then try again.'
       : `Too many attempts have been made. Wait ${reason.retryAfterSeconds} seconds, then try again.`
   }
-  return 'That address answered, but not as an OpenSkyLight household. Check the address and the PIN, then try again.'
+  // This household has never had a PIN set. The app cannot do first-run setup
+  // — it has nothing to authenticate with until a PIN exists — so say where it
+  // is done rather than leaving a parent retrying a PIN that cannot work yet.
+  if (reason.status === 409) {
+    return `This household has not been set up yet. Open ${address.trim()}/admin/ in a browser, choose a household PIN there, then come back and connect this phone.`
+  }
+  if (reason.status === 404) {
+    return `Something answered at ${address.trim()}, but it does not offer phone pairing. Either that is not the OpenSkyLight server, or the server is running an older version than this app.`
+  }
+  // The server writes its errors for a parent to read, so show what it said
+  // rather than replacing it with a guess. The code is included because
+  // without it a failure here cannot be diagnosed from a photo of the screen.
+  return `That address answered, but refused the connection (${reason.status}): ${reason.message}`
 }
