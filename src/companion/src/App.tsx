@@ -15,6 +15,7 @@ import {
   parentGet,
   type ParentAuthStatus
 } from './api/client'
+import { cancelPhoneCalendarSync, startPhoneCalendarSyncTriggers } from './api/phoneCalendarSync'
 import { Card, GhostButton, PrimaryButton, TextInput } from './components/ui'
 import { PeopleCalendarsPage } from './pages/PeopleCalendarsPage'
 import { ChoresRewardsAdminPage } from './pages/ChoresRewardsAdminPage'
@@ -78,7 +79,17 @@ export default function App() {
     }
   }, [paired, native, pairingGeneration])
 
+  // This phone's own calendars are pushed while the app is open: on launch, and
+  // on every return from the background. Android grants no dependable
+  // background execution, so there is no schedule beyond that — which is what
+  // the calendar section tells the parent in as many words.
+  useEffect(() => {
+    if (!native || !paired || status?.authenticated !== true) return
+    return startPhoneCalendarSyncTriggers()
+  }, [native, paired, status?.authenticated, pairingGeneration])
+
   const unpair = () => {
+    cancelPhoneCalendarSync()
     disconnectFromHousehold()
     setStatus(null)
     setSection('home')

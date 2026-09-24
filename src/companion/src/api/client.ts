@@ -1,6 +1,7 @@
 import { Capacitor } from '@capacitor/core'
 import type { PairedParentDeviceDto, ParentDeviceDto, PairParentDeviceRequest } from '@shared/api/contract'
 import type { IpcChannel, IpcContract, IpcResult } from '@shared/ipc/contract'
+import { clearPhoneCalendarState, setPairedDeviceName } from './phoneCalendarStorage'
 
 const TOKEN_KEY = 'osl.companionToken'
 const CSRF_TOKEN_KEY = 'osl.parentCsrfToken'
@@ -125,7 +126,12 @@ export class ApiError extends Error {
     public readonly status: number,
     public readonly code: string,
     message: string,
-    public readonly retryAfterSeconds?: number
+    public readonly retryAfterSeconds?: number,
+    /** The refusal's own body, for the few routes that answer with something a
+     * caller must act on rather than only report — a phone push refused as
+     * stale carries the server's own timestamp back. Never rendered: callers
+     * read the fields they know about, and remote error text is not one. */
+    public readonly details?: unknown
   ) {
     super(message)
     this.name = 'ApiError'
@@ -172,7 +178,8 @@ export async function parentRequest<T>(path: string, init: RequestInit = {}, csr
       response.status,
       error.error?.code ?? 'request_failed',
       error.error?.message ?? 'The request could not be completed',
-      retryAfter === null ? undefined : Number(retryAfter)
+      retryAfter === null ? undefined : Number(retryAfter),
+      body
     )
   }
   return body as T
@@ -236,6 +243,9 @@ export async function pairParentDevice(pin: string, name: string): Promise<Paren
     body: JSON.stringify(request)
   })
   setParentCredential(paired.credential)
+  // Kept so this phone's own calendar source can be named after the phone the
+  // parent already named, rather than asking them the same question twice.
+  setPairedDeviceName(paired.name)
   const { credential: _credential, ...device } = paired
   return device
 }
@@ -249,6 +259,9 @@ export async function pairParentDevice(pin: string, name: string): Promise<Paren
  * route back except reinstalling it. Keep the clears in the transport layer so
  * no future caller has to remember them. */
 export async function connectToHousehold(address: string, pin: string, name: string): Promise<ParentAuthStatus> {
+  // A phone re-paired against a different household must not carry the previous
+  // one's calendar source id into it: that id names someone else's calendar.
+  clearPhoneCalendarState()
   setApiBaseUrl(normalizeServerAddress(address))
   try {
     await pairParentDevice(pin, name)
@@ -261,6 +274,7 @@ export async function connectToHousehold(address: string, pin: string, name: str
     clearApiBaseUrl()
     clearParentCredential()
     clearParentSession()
+    clearPhoneCalendarState()
     throw reason
   }
 }
@@ -272,6 +286,9 @@ export function disconnectFromHousehold(): void {
   clearParentCredential()
   clearApiBaseUrl()
   clearParentSession()
+  // The phone's calendar source id belongs to the household it was created in,
+  // and would name something else entirely in the next one.
+  clearPhoneCalendarState()
 }
 
 export function listParentDevices(): Promise<{ parentDevices: ParentDeviceDto[] }> {

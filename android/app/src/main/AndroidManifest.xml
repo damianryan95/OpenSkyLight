@@ -1,6 +1,19 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
+    <!--
+      Reading the phone's own calendars (N05). The calendar plugin does not
+      declare this itself, so without it the runtime permission request is
+      refused before the parent ever sees a prompt — the app simply reports no
+      calendars, which looks like an empty phone rather than a missing
+      permission.
+
+      Read-only on purpose. Writing back to the phone's calendar is N06, and
+      until that ticket is taken deliberately this app has no business holding
+      WRITE_CALENDAR.
+    -->
+    <uses-permission android:name="android.permission.READ_CALENDAR" />
+
     <application
         android:allowBackup="true"
         android:icon="@mipmap/ic_launcher"

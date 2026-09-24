@@ -3,6 +3,8 @@ import type { CalendarSourceDto, DiscoveredCalendarDto, PersonDto } from '@share
 import { ApiError, parentGet, parentMutation, parentUpload } from '../api/client'
 import { Card, EmptyNote, GhostButton, PersonAvatar, PrimaryButton, TextInput } from '../components/ui'
 import { AvatarCropDialog } from '../components/AvatarCropDialog'
+import { PhoneCalendarsCard } from '../components/PhoneCalendarsCard'
+import { syncPhoneCalendars } from '../api/phoneCalendarSync'
 import { PERSON_THEME_PACKS, type BuiltInPersonThemeId } from '@shared/personalization'
 
 const COLORS = ['#DC6B49', '#3D8B7A', '#527BC4', '#A66AB0', '#C68A2C', '#57736B']
@@ -138,11 +140,16 @@ function CalendarPanel({ people, sources, error, setError, onChanged }: { people
     try { await parentMutation(`/api/v1/calendar-sources/${encodeURIComponent(id)}`, 'DELETE'); setExpanded(null); setCalendars([]); await onChanged() }
     catch (reason) { setError(message(reason)) } finally { setBusy(false) }
   }
-  const saveCalendar = async (sourceId: string, calendar: DiscoveredCalendarDto) => {
+  const saveCalendar = async (sourceId: string, kind: CalendarSourceDto['kind'], calendar: DiscoveredCalendarDto) => {
     await parentMutation(`/api/v1/calendar-sources/${encodeURIComponent(sourceId)}/calendars`, 'PUT', {
       calendar: { id: calendar.id, name: calendar.name, color: calendar.color, primary: calendar.primary, readOnly: calendar.readOnly },
       selected: calendar.selected, audiencePersonId: calendar.audiencePersonId
     })
+    // Selecting a phone calendar does not backfill it: the server has no way to
+    // fetch from a phone, so the board stays empty until this phone pushes
+    // again. Doing that here is the difference between the parent seeing their
+    // calendar appear and seeing nothing happen at all.
+    if (kind === 'phone') await syncPhoneCalendars({ force: true })
     await openCalendars(sourceId)
   }
 
@@ -151,6 +158,7 @@ function CalendarPanel({ people, sources, error, setError, onChanged }: { people
       <h3 className="font-display text-xl font-semibold">Calendars</h3>
       <p className="mt-2 text-sm leading-5 text-ink-soft">Connect the calendar you already use. OpenSkyLight reads it directly — there is no account to create, no API key, and nothing to set up in a cloud console.</p>
     </Card>
+    <PhoneCalendarsCard onSynced={onChanged} />
     {error && <ErrorNote>{error}</ErrorNote>}
     {sources.length === 0 && adding === null && <EmptyNote>No calendar is connected yet.</EmptyNote>}
 
@@ -163,10 +171,15 @@ function CalendarPanel({ people, sources, error, setError, onChanged }: { people
         <button className="pressable min-h-11 px-2 font-extrabold text-ember" type="button" onClick={() => void disconnect(source.id)} disabled={busy}>Remove</button>
       </div>
       {source.error && <p className="text-sm font-bold text-red-800">{source.error}</p>}
-      {source.kind === 'caldav' && <GhostButton onClick={() => void openCalendars(source.id)}>{expanded === source.id ? 'Refresh calendars' : 'Choose calendars'}</GhostButton>}
+      {/* A phone announces its calendars by pushing them rather than by being
+          discovered, but what the parent does next — choose which appear, and
+          whose they are — is the same job and uses the same rows below. */}
+      {(source.kind === 'caldav' || source.kind === 'phone') && <GhostButton onClick={() => void openCalendars(source.id)}>{expanded === source.id ? 'Refresh calendars' : 'Choose calendars'}</GhostButton>}
       {expanded === source.id && <div className="space-y-3">
-        {calendars.length === 0 && <EmptyNote>No event calendars were found in this account.</EmptyNote>}
-        {calendars.map((calendar) => <CalendarRow key={calendar.id} calendar={calendar} people={people} onSave={(next) => saveCalendar(source.id, next)} />)}
+        {calendars.length === 0 && <EmptyNote>{source.kind === 'phone'
+          ? 'This phone has not sent its calendars yet. Allow calendar access above, then tap Sync now.'
+          : 'No event calendars were found in this account.'}</EmptyNote>}
+        {calendars.map((calendar) => <CalendarRow key={calendar.id} calendar={calendar} people={people} onSave={(next) => saveCalendar(source.id, source.kind, next)} />)}
       </div>}
     </Card>)}
 
