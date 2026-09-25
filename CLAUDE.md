@@ -91,6 +91,11 @@ These settle most design arguments. Check them before proposing anything.
   silent crash loop or an unreachable container.
 - **SQL strings are not typechecked.** A column rename compiles clean and fails
   at runtime — exercise the query.
+- **A wall display reloads itself only when `app:getInfo.buildId` changes.**
+  That is a digest of the served `out/kiosk/index.html`, not the image tag —
+  every Portainer build is tagged `dev`, so keying on the tag meant screens
+  never picked up a deployment. If a deployed change "isn't showing", check the
+  screen actually reloaded before blaming the build.
 - Git Bash mangles container paths; use `MSYS_NO_PATHCONV=1` and `//var/run/...`.
 
 ## Conventions

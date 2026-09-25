@@ -5,6 +5,7 @@ import { isCelebrationForDisplay } from '@shared/celebration'
 
 const DISPLAY_CREDENTIAL_KEY = 'osl.displayCredential'
 const DISPLAY_ID_KEY = 'osl.displayId'
+const DISPLAY_REVOKED_KEY = 'osl.displayRevoked'
 type PushListener = (data: unknown) => void
 export type BrowserConnectionStatus = 'connecting' | 'live' | 'reconnecting'
 const pushListeners = new Map<string, Set<PushListener>>()
@@ -37,6 +38,35 @@ export function displayId(): string | null { return localStorage.getItem(DISPLAY
 export function persistDisplayCredential(credential: string, id: string): void {
   localStorage.setItem(DISPLAY_CREDENTIAL_KEY, credential)
   localStorage.setItem(DISPLAY_ID_KEY, id)
+}
+
+/**
+ * The server refused a credential this screen holds.
+ *
+ * That is not a network failure to ride out. A revoked or forgotten display
+ * gets 401 on every request for ever, and a board that keeps retrying a dead
+ * bearer never returns to the QR that would let a parent add it again — which
+ * is exactly what a parent who just revoked it is standing there waiting for.
+ * Forget the credential and reboot into the enrolment gate.
+ *
+ * Only a refusal the server actually made triggers this. An unreachable server
+ * is a different thing entirely, and a working screen keeps rendering its cache
+ * through it.
+ */
+function forgetRefusedDisplay(): void {
+  if (displayCredential() === null) return
+  localStorage.removeItem(DISPLAY_CREDENTIAL_KEY)
+  localStorage.removeItem(DISPLAY_ID_KEY)
+  sessionStorage.setItem(DISPLAY_REVOKED_KEY, '1')
+  window.location.reload()
+}
+
+/** True once, on the boot after a refusal, so the enrolment screen can say why
+ * it is back rather than looking like a factory reset nobody asked for. */
+export function consumeDisplayRevokedNotice(): boolean {
+  const flagged = sessionStorage.getItem(DISPLAY_REVOKED_KEY) === '1'
+  if (flagged) sessionStorage.removeItem(DISPLAY_REVOKED_KEY)
+  return flagged
 }
 
 /**
@@ -97,6 +127,7 @@ export async function fetchDisplayMedia(path: string, signal?: AbortSignal): Pro
   const credential = displayCredential()
   if (credential === null) throw new BrowserIpcError('unauthorized', 'Display is not registered')
   const response = await fetch(path, { headers: { Authorization: `Bearer ${credential}` }, signal, cache: 'no-store' })
+  if (response.status === 401) forgetRefusedDisplay()
   if (!response.ok) throw new BrowserIpcError('media_unavailable', 'Display media is unavailable')
   return response.blob()
 }
@@ -126,6 +157,7 @@ export async function browserInvoke<K extends IpcChannel>(channel: K, req: IpcCo
     method: 'POST', headers, body: req === undefined ? undefined : JSON.stringify(req)
   })
   const result = await response.json().catch(() => undefined) as IpcResult<IpcContract[K]['res']> | undefined
+  if (response.status === 401 && credential !== null) forgetRefusedDisplay()
   if (!response.ok || result === undefined || !result.ok) {
     const error = result !== undefined && !result.ok ? result.error : { code: 'network_error', message: `Request failed (${response.status})` }
     throw new BrowserIpcError(error.code, error.message)
@@ -160,6 +192,9 @@ function startEventStream(): void {
       const headers = new Headers({ Accept: 'text/event-stream', Authorization: `Bearer ${displayCredential()!}` })
       if (lastEventId !== undefined) headers.set('Last-Event-ID', lastEventId)
       const response = await fetch('/api/v1/events', { headers })
+      // The stream is the first thing to notice a revocation, often within a
+      // second of the parent tapping it.
+      if (response.status === 401) forgetRefusedDisplay()
       if (!response.ok || response.body === null) throw new Error('Event stream unavailable')
       emit('push:connectionStatus', { state: 'live' satisfies BrowserConnectionStatus, recovered: hasConnected })
       hasConnected = true

@@ -277,7 +277,10 @@ export function useEventMutations() {
 }
 
 export function useAuthStatus() {
-  return useQuery({ queryKey: ['authStatus'], queryFn: () => ipcInvoke('auth:getStatus', undefined) })
+  // A display polls this: the unlock is a ten-minute window held on the server,
+  // and the editing affordances must disappear when it lapses rather than offer
+  // a save the server is about to refuse.
+  return useQuery({ queryKey: ['authStatus'], queryFn: () => ipcInvoke('auth:getStatus', undefined), refetchInterval: displayRefreshInterval() })
 }
 
 export function useAuthMutations() {

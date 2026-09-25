@@ -49,11 +49,14 @@ describe('browser kiosk display-read RPC bridge', () => {
     await handleApiRequest(
       request('/api/rpc/app%3AgetInfo', credential),
       response as unknown as ServerResponse,
-      { ...deps, now: () => new Date('2026-06-10T12:30:00.000Z') }
+      { ...deps, now: () => new Date('2026-06-10T12:30:00.000Z'), kioskBuildId: 'bundle-9f2c' }
     )
+    // `buildId` is what the display compares to decide whether to reload. It
+    // is the served bundle's digest, not the release tag, which is `dev` on
+    // every Portainer build and so never changed.
     expect(JSON.parse(response.body)).toMatchObject({
       ok: true,
-      data: { zone: 'Pacific/Kiritimati', householdDate: '2026-06-11' }
+      data: { zone: 'Pacific/Kiritimati', householdDate: '2026-06-11', buildId: 'bundle-9f2c' }
     })
     database.close()
   })

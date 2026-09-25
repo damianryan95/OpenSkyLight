@@ -14,6 +14,7 @@ import { DayView } from './features/calendar/DayView'
 import { MonthView } from './features/calendar/MonthView'
 import { AgendaView } from './features/calendar/AgendaView'
 import { EventEditorHost } from './features/calendar/EventEditorHost'
+import { AddEventFab } from './features/calendar/EditingControls'
 import { ChoresView } from './features/chores/ChoresView'
 import { ListsView } from './features/lists/ListsView'
 import { SettingsSheet } from './features/settings/SettingsSheet'
@@ -32,9 +33,10 @@ export default function App() {
   useTheme()
   usePersonTheme()
 
-  // A kiosk normally stays open for weeks. Poll the authenticated server
-  // version so a completed deployment replaces its already-loaded bundle
-  // without anyone needing to visit the display.
+  // A kiosk normally stays open for weeks. Poll the server's bundle digest so
+  // a completed deployment replaces the already-loaded bundle without anyone
+  // needing to visit the display. The digest, not the release tag: every
+  // Portainer build is tagged `dev`, and keying on that left screens stale.
   const displayVersion = useRef<string | null>(null)
   const householdDate = useRef<string | null>(null)
   useEffect(() => {
@@ -42,7 +44,7 @@ export default function App() {
     let cancelled = false
     const checkForUpdate = async (): Promise<void> => {
       try {
-        const { version, zone, householdDate: serverDate } = await ipcInvoke('app:getInfo', undefined)
+        const { buildId, zone, householdDate: serverDate } = await ipcInvoke('app:getInfo', undefined)
         if (cancelled) return
         // Keep the date used by every display-side chore action in the same
         // household timezone that the server authorizes.  Do not disturb a
@@ -55,11 +57,11 @@ export default function App() {
           state.setHouseholdClock(zone, state.focusedDate)
         }
         householdDate.current = serverDate
-        if (displayVersion.current !== null && displayVersion.current !== version) {
+        if (displayVersion.current !== null && displayVersion.current !== buildId) {
           window.location.reload()
           return
         }
-        displayVersion.current = version
+        displayVersion.current = buildId
       } catch {
         // Keep the current display usable while the server is restarting.
       }
@@ -100,6 +102,7 @@ export default function App() {
       </main>
       <SettingsSheet />
       <EventEditorHost />
+      <AddEventFab />
       <OskTray />
       <Toasts />
       <UpdateBanner />

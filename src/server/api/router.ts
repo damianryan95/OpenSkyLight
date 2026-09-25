@@ -39,6 +39,9 @@ export interface ApiRouterDependencies {
   eventAuthoring?: EventAuthoringService
   /** The outbound queue a phone drains. */
   phoneWrites?: PhoneWriteService
+  /** Digest of the served kiosk bundle; what a display compares to decide
+   * whether to reload. See `kioskBuildIdFor` in server.ts for why not the tag. */
+  kioskBuildId?: string
   /** Injectable clock for household-date authorization tests. */
   now?: () => Date
 }
@@ -786,6 +789,9 @@ async function handleDisplayReadRpc(
   switch (channel) {
     case 'app:getInfo': return {
       version: process.env.OSL_RELEASE_VERSION ?? '0.8.0',
+      // The reload key. Falls back to the tag only where no bundle is served,
+      // which is domain-only tests — never a real deployment.
+      buildId: dependencies.kioskBuildId ?? process.env.OSL_RELEASE_VERSION ?? 'dev',
       platform: 'browser',
       zone: dependencies.settings.get().timezone,
       householdDate: currentHouseholdDate(dependencies.settings, dependencies.now)

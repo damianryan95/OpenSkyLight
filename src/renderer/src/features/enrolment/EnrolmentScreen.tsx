@@ -1,4 +1,5 @@
-import { useEffect, type ReactNode } from 'react'
+import { useEffect, useState, type ReactNode } from 'react'
+import { consumeDisplayRevokedNotice } from '../../api/browser'
 import { CheckIcon } from '../../components/icons'
 import { QrCode } from './QrCode'
 import { useEnrolment } from './useEnrolment'
@@ -33,6 +34,8 @@ function readableAddress(origin: string): string {
 export function EnrolmentScreen() {
   const { state, now } = useEnrolment()
   const origin = window.location.origin
+  // Read once at mount and cleared: it belongs to this boot only.
+  const [revoked] = useState(() => consumeDisplayRevokedNotice())
 
   // Bringing the board up is a full reload: the display credential is now in
   // storage, and a fresh boot is the one deterministic way to start the event
@@ -107,6 +110,11 @@ export function EnrolmentScreen() {
         </div>
 
         <div className="flex max-w-[44rem] flex-col gap-5 text-center lg:text-left">
+          {revoked && (
+            <p role="status" data-enrolment-revoked="true" className="self-center rounded-full bg-paper-deep px-6 py-3 text-[clamp(1.05rem,1.4vw,1.5rem)] font-bold text-ink-soft lg:self-start">
+              This screen was removed from the household. Scan the code to add it back.
+            </p>
+          )}
           <h1 className="font-display text-[clamp(2.4rem,4vw,4rem)] leading-tight font-semibold">
             Set up this screen
           </h1>

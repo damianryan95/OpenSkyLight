@@ -9,6 +9,7 @@ import { initials, textOn } from '../../lib/format'
 import { inViewingContext } from '@shared/viewingContext'
 import type { CalendarViewKind } from '@shared/types'
 import { isDisplayClient } from '../../lib/clientMode'
+import { LockControl } from '../calendar/EditingControls'
 
 function useNow(): DateTime {
   const [now, setNow] = useState(() => DateTime.now().setZone(ZONE))
@@ -151,7 +152,9 @@ export function Header() {
         ]}
       />
 
-      {!display && <IconButton label="Settings" onClick={() => setSettingsOpen(true)}>
+      {/* A display shows its lock where a desktop shows settings: the one place
+          on every view where a parent can see editing is off, and turn it on. */}
+      {display ? <LockControl /> : <IconButton label="Settings" onClick={() => setSettingsOpen(true)}>
         <GearIcon size={26} />
       </IconButton>}
     </header>

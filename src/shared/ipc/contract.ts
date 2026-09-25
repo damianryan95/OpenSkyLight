@@ -30,7 +30,7 @@ import type {
  * channel and the renderer gets a fully typed `ipcInvoke`.
  */
 export type IpcContract = {
-  'app:getInfo': { req: void; res: { version: string; platform: string; zone: string; householdDate: string } }
+  'app:getInfo': { req: void; res: { version: string; buildId: string; platform: string; zone: string; householdDate: string } }
   'app:installUpdate': { req: void; res: void }
 
   'settings:getAll': { req: void; res: AppSettings }

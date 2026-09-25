@@ -1,6 +1,7 @@
 import { createServer, type Server } from 'node:http'
 import { once } from 'node:events'
-import { createReadStream, existsSync, statSync } from 'node:fs'
+import { createHash } from 'node:crypto'
+import { createReadStream, existsSync, readFileSync, statSync } from 'node:fs'
 import { extname, resolve, sep } from 'node:path'
 import { sendLiveHealth, sendReadyHealth } from './api/health'
 import { handleApiRequest } from './api/router'
@@ -45,6 +46,23 @@ export interface HeadlessServer {
 }
 
 /**
+ * Identifies the kiosk bundle actually being served, so a wall display can tell
+ * a new deployment from the one it is running and reload itself.
+ *
+ * The release tag cannot do this job: every Portainer build ships as `dev`, so a
+ * version string compared across deployments never changed, and screens sat on
+ * a stale bundle until somebody walked up and refreshed them. The hashed asset
+ * names inside index.html change with every real build, so a digest of that
+ * file does too — with no compose or Portainer configuration.
+ */
+export function kioskBuildIdFor(staticDir: string | undefined): string | undefined {
+  if (staticDir === undefined) return undefined
+  const index = resolve(staticDir, 'index.html')
+  if (!existsSync(index)) return undefined
+  return createHash('sha256').update(readFileSync(index)).digest('hex').slice(0, 16)
+}
+
+/**
  * Minimal Node-only process boundary for the future household service. Domain
  * services are added behind this transport as they are extracted from Electron.
  */
@@ -52,6 +70,7 @@ export function createHeadlessServer(options: HeadlessServerOptions = {}): Headl
   const host = options.host ?? '0.0.0.0'
   const port = options.port ?? 3000
   const eventStream = new EventStream()
+  const kioskBuildId = kioskBuildIdFor(options.staticDir)
   const auth = options.database === undefined ? undefined : new HouseholdAuthService(options.database.sqlite)
   const displays = options.database === undefined ? undefined : new DisplayDeviceService(options.database.sqlite)
   const parentDevices = options.database === undefined ? undefined : new ParentDeviceService(options.database.sqlite)
@@ -103,6 +122,7 @@ export function createHeadlessServer(options: HeadlessServerOptions = {}): Headl
   const meals = options.database === undefined ? undefined : createMealsDomain(options.database.sqlite)
   const httpServer = createHttpServer({
     eventStream,
+    kioskBuildId,
     eventStreamAuthenticator: options.eventStreamAuthenticator ?? (auth === undefined || displays === undefined ? undefined : {
       authenticate(request) {
         const parentToken = readCookie(request, PARENT_SESSION_COOKIE)

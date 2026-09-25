@@ -5,7 +5,6 @@ import { occurrenceColor } from '../../lib/colors'
 import { EventCard } from './EventCard'
 import { useCalendarData, useViewRange } from './useCalendarData'
 import { useCalendarEditing } from './useEventEditor'
-import { BigButton } from '../../components/ui'
 import { DateTime } from 'luxon'
 import { MealsDialog, MealStrip, useMealsForRange } from '../meals/Meals'
 
@@ -19,7 +18,7 @@ export function DayView() {
   const day = DateTime.fromISO(focusedDate, { zone: ZONE })
   const mealsByDay = useMealsForRange(range)
   const [mealDate, setMealDate] = useState<string | null>(null)
-  const { unlocked, editOccurrence, createOn } = useCalendarEditing()
+  const { editOccurrence } = useCalendarEditing()
 
   return (
     <div className="mx-auto h-full w-full max-w-3xl overflow-y-auto px-6 pb-28">
@@ -54,9 +53,6 @@ export function DayView() {
           <div className="animate-rise mt-16 flex flex-col items-center gap-5 text-center">
             <div className="font-display text-3xl text-ink-faint">A clear day</div>
           </div>
-        )}
-        {unlocked && (
-          <BigButton variant="ghost" onClick={() => createOn(focusedDate)}>Add an event</BigButton>
         )}
       </div>
     </div>

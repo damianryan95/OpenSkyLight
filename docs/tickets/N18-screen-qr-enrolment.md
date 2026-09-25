@@ -54,6 +54,13 @@ existed. Photographing the wall yields nothing.
 - **No real camera has scanned it.** The payload is unit-tested against the
   exact string the kiosk emits, and manual entry is covered end to end, but a
   lens has never been pointed at the screen.
+- **A revoked screen returns to the QR** (added 2026-09-25). Before this,
+  nothing ever cleared a stored display credential: a revoked screen sat on the
+  board with every request refused, for ever. Now the first 401 the server
+  itself answers — RPC, media, or the event stream, which notices within a
+  second — forgets the credential and reboots into the enrolment gate, which
+  says why it is back. A network failure never does this; only a refusal does.
+  `tests/unit/kioskRevocation.test.ts` pins the distinction.
 
 ## Context
 
