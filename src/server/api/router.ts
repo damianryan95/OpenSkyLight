@@ -1,7 +1,7 @@
 import type { IncomingMessage, ServerResponse } from 'node:http'
 import { z } from 'zod'
 import { DateTime } from 'luxon'
-import { ackEventWritesRequestSchema, ackEventWritesResponseSchema, addListItemRequestSchema, authoredEventSchema, eventDraftSchema, eventScopeSchema, updateEventRequestSchema, apiContract, apiInfoResponseSchema, choreCorrectionRequestSchema, claimEnrolmentRequestSchema, claimEnrolmentResponseSchema, connectCalDavRequestSchema, connectIcsRequestSchema, connectPhoneRequestSchema, displayDeviceSchema, enrolDisplayRequestSchema, enrolmentCodeSchema, pendingEventWritesResponseSchema, pushPhoneCalendarsConflictSchema, pushPhoneCalendarsRequestSchema, pushPhoneCalendarsResponseSchema, setCalendarSelectionRequestSchema, createChoreRequestSchema, createListRequestSchema, createPersonRequestSchema, createRewardRequestSchema, displayChoreCommandRequestSchema, mealRangeRequestSchema, mealSlotKindSchema, pairParentDeviceRequestSchema, redeemRewardRequestSchema, registerDisplayRequestSchema, setMealRequestSchema, setMealTemplateRequestSchema, starAdjustmentRequestSchema, updateChoreRequestSchema, updateDisplayRequestSchema, updateHouseholdSettingsRequestSchema, updateListRequestSchema, updatePersonRequestSchema, updateRewardRequestSchema } from '../../shared/api/contract'
+import { ackEventWritesRequestSchema, ackEventWritesResponseSchema, addListItemRequestSchema, authoredEventSchema, claimHouseholdRequestSchema, eventDraftSchema, eventScopeSchema, updateEventRequestSchema, apiContract, apiInfoResponseSchema, choreCorrectionRequestSchema, claimEnrolmentRequestSchema, claimEnrolmentResponseSchema, connectCalDavRequestSchema, connectIcsRequestSchema, connectPhoneRequestSchema, displayDeviceSchema, enrolDisplayRequestSchema, enrolmentCodeSchema, pendingEventWritesResponseSchema, pushPhoneCalendarsConflictSchema, pushPhoneCalendarsRequestSchema, pushPhoneCalendarsResponseSchema, setCalendarSelectionRequestSchema, createChoreRequestSchema, createListRequestSchema, createPersonRequestSchema, createRewardRequestSchema, displayChoreCommandRequestSchema, mealRangeRequestSchema, mealSlotKindSchema, pairParentDeviceRequestSchema, redeemRewardRequestSchema, registerDisplayRequestSchema, setMealRequestSchema, setMealTemplateRequestSchema, starAdjustmentRequestSchema, updateChoreRequestSchema, updateDisplayRequestSchema, updateHouseholdSettingsRequestSchema, updateListRequestSchema, updatePersonRequestSchema, updateRewardRequestSchema } from '../../shared/api/contract'
 import { AuthError, CSRF_HEADER, DisplayDeviceService, DisplayEnrolmentService, HouseholdAuthService, ParentDeviceService, PARENT_SESSION_COOKIE } from '../auth'
 import { type ChoresRewardsService, type DisplayReadService, type HouseholdSettingsService, type ListsDomain, type MealsDomain, type PeopleService, type MediaService } from '../domain'
 import { createReadStream } from 'node:fs'
@@ -629,6 +629,28 @@ export async function handleApiRequest(request: IncomingMessage, response: Serve
       requireParentMutation(dependencies, request)
       if (displays === undefined) throw new ApiRequestError(503, 'service_unavailable', 'Display service is unavailable')
       sendJson(response, 200, displays.update(displayId, await readJsonBody(request, updateDisplayRequestSchema)))
+      return true
+    }
+
+    // ADR 0006 case 1: a phone claims a household nobody has set up yet. It sets
+    // the PIN and pairs itself in one transaction, and gets the bearer it will
+    // authenticate with from then on. This is the step that used to need a
+    // browser, and it is the one the phone-first promise turns on.
+    //
+    // Unauthenticated by necessity: there is no PIN to check yet. The guards are
+    // the ones pairing already relies on — JSON is demanded so a hostile page
+    // cannot drive it without a preflight the server never answers, and there is
+    // no origin check because the caller is at a foreign origin by definition.
+    // Once a household is configured this answers 409 for ever; `setup` enforces
+    // that inside the transaction, so two phones racing cannot both win.
+    if (path === '/api/v1/household/claim') {
+      if (method !== 'POST') throw new ApiRequestError(405, 'method_not_allowed', `Method ${method} is not allowed`)
+      if (auth === undefined) throw new ApiRequestError(503, 'service_unavailable', 'Authentication service is unavailable')
+      const parentDevices = requireParentDevices(dependencies)
+      assertJsonContentType(request)
+      const { pin, name } = await readJsonBody(request, claimHouseholdRequestSchema)
+      // The credential is intentionally present only in this response.
+      sendJson(response, 201, auth.claim(pin, () => parentDevices.pair({ name })))
       return true
     }
 

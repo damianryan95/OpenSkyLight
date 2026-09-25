@@ -1,5 +1,5 @@
 import { Capacitor } from '@capacitor/core'
-import type { DisplayDevice, PairedParentDeviceDto, ParentDeviceDto, PairParentDeviceRequest } from '@shared/api/contract'
+import type { DisplayDevice, PairedParentDeviceDto, ParentDeviceDto, ClaimHouseholdRequest, PairParentDeviceRequest } from '@shared/api/contract'
 import type { IpcChannel, IpcContract, IpcResult } from '@shared/ipc/contract'
 import { clearPhoneCalendarState, setPairedDeviceName } from './phoneCalendarStorage'
 
@@ -289,6 +289,43 @@ export async function pairParentDevice(pin: string, name: string): Promise<Paren
   setPairedDeviceName(paired.name)
   const { credential: _credential, ...device } = paired
   return device
+}
+
+/** Claim a household nobody has set up yet (ADR 0006, case 1): the PIN given
+ * here becomes the household PIN and this phone becomes its first parent phone,
+ * in one request. Stores the credential exactly as pairing does. */
+async function claimParentDevice(pin: string, name: string): Promise<ParentDeviceDto> {
+  const request: ClaimHouseholdRequest = { pin, name }
+  const claimed = await parentRequest<PairedParentDeviceDto>('/api/v1/household/claim', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(request)
+  })
+  setParentCredential(claimed.credential)
+  setPairedDeviceName(claimed.name)
+  const { credential: _credential, ...device } = claimed
+  return device
+}
+
+/** Set up a brand-new household from this phone and pair it, with the same
+ * all-or-nothing unwind as `connectToHousehold`. A refused claim — most often a
+ * household that turned out to be configured after all — leaves no address or
+ * credential behind for the app to keep failing against. */
+export async function claimHousehold(address: string, pin: string, name: string): Promise<ParentAuthStatus> {
+  clearPhoneCalendarState()
+  setApiBaseUrl(normalizeServerAddress(address))
+  try {
+    await claimParentDevice(pin, name)
+    const status = await getParentAuthStatus()
+    if (!status.authenticated) throw new ApiError(401, 'unauthorized', 'The household did not accept this phone')
+    return status
+  } catch (reason) {
+    clearApiBaseUrl()
+    clearParentCredential()
+    clearParentSession()
+    clearPhoneCalendarState()
+    throw reason
+  }
 }
 
 /** Point the app at a household server and pair it, as one step that either

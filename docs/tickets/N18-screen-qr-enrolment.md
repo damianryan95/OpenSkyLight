@@ -14,18 +14,18 @@ collects its own credential and opens the board with no further interaction.
 handed the server address by the QR, asks only for the PIN, and pairs and enrols
 in one step.
 
-**Case 1 is blocked, and not by this ticket.** `POST /api/v1/auth/setup` still
-calls `assertSameOrigin`, which an app at `capacitor://localhost` can never
-satisfy — the same-origin blocker `N05` recorded. So a factory-fresh household
-still needs a browser once, to set the PIN, which fails this ticket's first
-acceptance criterion: *"a factory-fresh screen and a phone with the app produce
-a working, enrolled kiosk and a configured household, with no browser"*. The
-app says so plainly rather than failing obscurely.
-
-The fix is the one already proven on the pairing route in `N17`: drop the origin
-check on `setup` and require `Content-Type: application/json`, which forces a
-preflight the server never answers, so a hostile page still cannot reach it.
-Small, and it is what makes the phone-first promise true.
+**Case 1 was blocked until 2026-09-25**, by `POST /api/v1/auth/setup` calling
+`assertSameOrigin`, which an app at `capacitor://localhost` can never satisfy.
+It is unblocked by a purpose-built `POST /api/v1/household/claim` rather than by
+loosening `setup`: one request, one transaction, sets the PIN **and** pairs the
+calling phone, returning the bearer it authenticates with from then on. The
+browser's `setup` route is untouched and still same-origin. Guards are the ones
+pairing already relies on — JSON is demanded so a hostile page cannot drive it
+without a preflight — and once the household is configured the route answers
+409 for ever, which `setup` enforces inside the transaction and which settles
+two phones racing the same screen. `tests/unit/householdClaim.test.ts` tests
+each of those refusals directly. The first-run flow the phone runs after
+claiming is `N04`'s.
 
 ### The security property, tested rather than argued
 

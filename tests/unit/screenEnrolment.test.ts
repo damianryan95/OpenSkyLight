@@ -136,9 +136,11 @@ describe('the three redemption cases', () => {
     })
   })
 
-  it('refuses to pretend it can claim a household that has no PIN', () => {
+  it('lets the first phone to scan a brand-new screen claim the household', () => {
+    // ADR 0006 case 1, trust on first use. There is no PIN to ask for yet, so
+    // the phone is the one that creates it.
     expect(decideEnrolmentStep(scan, { paired: false, configured: false })).toEqual({
-      kind: 'household-not-set-up',
+      kind: 'claim-household',
       serverAddress: 'http://192.168.1.50:3000'
     })
   })

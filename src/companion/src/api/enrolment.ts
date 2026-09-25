@@ -92,8 +92,9 @@ export type EnrolmentStep =
   | { kind: 'name-the-screen'; serverAddress: string; addressMismatch: boolean }
   /** Case 3. The scan supplied the address; the parent still has to supply the PIN. */
   | { kind: 'pair-this-phone'; serverAddress: string }
-  /** Case 1. Not implementable here yet — say so rather than failing obscurely. */
-  | { kind: 'household-not-set-up'; serverAddress: string }
+  /** Case 1. Nobody has set this household up: the scanning phone claims it,
+   * becoming its first parent phone, and runs first-run setup. */
+  | { kind: 'claim-household'; serverAddress: string }
 
 /**
  * The three cases of ADR 0006, decided from household state rather than from a
@@ -112,7 +113,7 @@ export function decideEnrolmentStep(scan: EnrolmentScan, state: HouseholdState):
     }
   }
   if (state.configured) return { kind: 'pair-this-phone', serverAddress: scan.serverAddress }
-  return { kind: 'household-not-set-up', serverAddress: scan.serverAddress }
+  return { kind: 'claim-household', serverAddress: scan.serverAddress }
 }
 
 /**

@@ -56,6 +56,13 @@ export const pairParentDeviceRequestSchema = z.object({
 export const pairedParentDeviceSchema = parentDeviceSchema.extend({ credential: z.string().min(1) })
 
 /**
+ * Claiming a brand-new household from a phone (ADR 0006, case 1): the PIN this
+ * request carries *becomes* the household PIN, and the caller becomes the first
+ * paired parent phone, in one act. Same shape as pairing on purpose — it is the
+ * same question asked of a household that has nobody to answer it yet. */
+export const claimHouseholdRequestSchema = pairParentDeviceRequestSchema
+
+/**
  * Screen-initiated enrolment (ADR 0006). The minting response is the only place
  * `pollToken` ever appears: it is what proves a caller is the screen that asked
  * to be adopted, so it is never rendered, never in the QR, and never in a URL.
@@ -487,6 +494,7 @@ export type RegisteredDisplay = z.infer<typeof registeredDisplaySchema>
 export type ParentDeviceDto = z.infer<typeof parentDeviceSchema>
 export type PairedParentDeviceDto = z.infer<typeof pairedParentDeviceSchema>
 export type PairParentDeviceRequest = z.infer<typeof pairParentDeviceRequestSchema>
+export type ClaimHouseholdRequest = z.infer<typeof claimHouseholdRequestSchema>
 export type EnrolmentCode = z.infer<typeof enrolmentCodeSchema>
 export type ClaimEnrolmentRequest = z.infer<typeof claimEnrolmentRequestSchema>
 export type ClaimEnrolmentResponse = z.infer<typeof claimEnrolmentResponseSchema>

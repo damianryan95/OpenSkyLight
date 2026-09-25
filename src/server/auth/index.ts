@@ -125,6 +125,27 @@ export class HouseholdAuthService {
     return create()
   }
 
+  /**
+   * First-run setup and first pairing as one act (ADR 0006, case 1).
+   *
+   * The PIN is created and `pair` runs inside a single transaction, so the two
+   * outcomes a phone could otherwise be left in cannot occur: a household with a
+   * PIN that no device can use, or a paired device on a household that has no
+   * PIN. `setup` refuses a configured household inside that same transaction,
+   * which is also what settles two phones racing to claim a brand-new screen —
+   * exactly one of them wins and the other is told so.
+   *
+   * The browser session `setup` mints is discarded here: a phone authenticates
+   * with the bearer credential `pair` returns, never with a cookie.
+   */
+  claim<T>(pin: string, pair: () => T): T {
+    return this.sqlite.transaction(() => {
+      const session = this.setup(pin)
+      this.logout(session.sessionToken)
+      return pair()
+    })()
+  }
+
   login(pin: string): ParentSession & { sessionToken: string } {
     assertPin(pin)
     const now = this.now()

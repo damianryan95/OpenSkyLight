@@ -47,7 +47,7 @@ type Stage =
   | { kind: 'manual' }
   | { kind: 'checking'; scan: EnrolmentScan }
   | { kind: 'pair'; scan: EnrolmentScan; serverAddress: string }
-  | { kind: 'not-set-up'; serverAddress: string }
+  | { kind: 'claim'; scan: EnrolmentScan; serverAddress: string }
   | { kind: 'name'; scan: EnrolmentScan; serverAddress: string; addressMismatch: boolean }
   | { kind: 'done'; screenName: string }
 
@@ -55,6 +55,7 @@ export function AddScreenFlow({
   initialCode,
   onEnrolled,
   onPaired,
+  onClaimHousehold,
   onClose
 }: {
   /** A code that arrived in the address bar, from a scan by the phone's own
@@ -66,6 +67,11 @@ export function AddScreenFlow({
   /** Only supplied by the connect screen, where finishing also means this phone
    * is now paired and the app should open. */
   onPaired?: (status: ParentAuthStatus) => void
+  /** Case 1 of ADR 0006. The scanned screen belongs to a household nobody has
+   * set up, so this phone gets to. The connect screen supplies this and takes
+   * over with the first-run flow; a paired phone under Displays can never meet
+   * case 1 and so never supplies it. */
+  onClaimHousehold?: (serverAddress: string, scan: EnrolmentScan) => void
   onClose: () => void
 }) {
   const [stage, setStage] = useState<Stage>(() => {
@@ -122,7 +128,10 @@ export function AddScreenFlow({
       if (!alive.current) return
       const step = decideEnrolmentStep(scan, { paired: false, configured: status.configured })
       if (step.kind === 'pair-this-phone') setStage({ kind: 'pair', scan, serverAddress: step.serverAddress })
-      else if (step.kind === 'household-not-set-up') setStage({ kind: 'not-set-up', serverAddress: step.serverAddress })
+      else if (step.kind === 'claim-household') {
+        if (onClaimHousehold !== undefined) { onClaimHousehold(step.serverAddress, scan); return }
+        setStage({ kind: 'claim', scan, serverAddress: step.serverAddress })
+      }
       else setStage({ kind: 'name', scan, serverAddress: step.serverAddress, addressMismatch: false })
     } catch (reason) {
       if (!alive.current || (reason instanceof DOMException && reason.name === 'AbortError')) return
@@ -318,12 +327,11 @@ export function AddScreenFlow({
 
       {stage.kind === 'checking' && <p className="text-base font-bold text-ink-faint">Looking for your household…</p>}
 
-      {stage.kind === 'not-set-up' && (
+      {stage.kind === 'claim' && (
         <div className="space-y-3">
           <p className="text-base leading-6 text-ink-soft">
-            This household has not been set up yet, so there is no PIN for this phone to prove itself with. Open <span className="font-bold break-all">{stage.serverAddress}/admin/</span> in a browser on any device, choose a household PIN there, then come back and scan the screen again.
+            That screen belongs to a brand-new household at <span className="font-bold break-all">{stage.serverAddress}</span> — nobody has set it up yet. This phone can do that: go back to the connect screen and choose <span className="font-bold">Set up a new household</span>.
           </p>
-          <p className="text-sm leading-5 text-ink-faint">The app cannot do that first-time setup itself yet.</p>
           <FullGhost onClick={onClose}>Close</FullGhost>
         </div>
       )}
@@ -394,7 +402,7 @@ function explainPairing(reason: unknown, serverAddress: string): string {
   const status = (reason as { status?: unknown }).status
   if (status === 401) return 'That household PIN was not accepted. Check the PIN you use to open household settings in a browser, then try again.'
   if (status === 429) return 'Too many attempts have been made. Wait a minute, then try again.'
-  if (status === 409) return `This household has not been set up yet. Open ${serverAddress}/admin/ in a browser, choose a household PIN there, then scan the screen again.`
+  if (status === 409) return 'This household has not been set up yet, so there is no PIN to connect with. Go back and choose Set up a new household instead.'
   if (typeof status === 'number') return `That household refused the connection (${status}). Check the screen is still showing a code, then try again.`
   return `Nothing answered at ${serverAddress}. Check this phone is on the same home Wi-Fi as the screen rather than mobile data, then try again.`
 }
