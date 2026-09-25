@@ -333,6 +333,38 @@ export class DisplayDeviceService {
     return { ...this.getById(id)!, credential }
   }
 
+  /**
+   * Registers a display that has not collected its credential yet (ADR 0006).
+   *
+   * The stored hash is random bytes with no preimage anyone holds, so nothing
+   * can authenticate as this display until `issueCredential` replaces it. That
+   * is what lets the phone's redeem and the screen's collection be two separate
+   * requests with nothing secret parked between them.
+   */
+  registerAwaitingCredential(input: { name: string }): DisplayDevice {
+    const name = assertDeviceName(input.name, 'Display')
+    const now = this.now()
+    const id = randomBytes(16).toString('hex')
+    try {
+      this.sqlite.prepare(
+        'INSERT INTO devices (id, name, credential_hash, registered_at) VALUES (?, ?, ?, ?)'
+      ).run(id, name, randomBytes(32), now)
+    } catch (error) {
+      if (isUniqueConstraint(error)) throw new AuthError(409, 'conflict', 'A display with that name already exists')
+      throw error
+    }
+    return this.getById(id)!
+  }
+
+  /** Mints the credential for a display and returns it - the one moment it
+   * exists in plaintext. Refused for a revoked or unknown display. */
+  issueCredential(id: string): string {
+    const { credential, credentialHash } = this.credentials.mint()
+    const result = this.sqlite.prepare('UPDATE devices SET credential_hash = ? WHERE id = ? AND revoked_at IS NULL').run(credentialHash, id)
+    if (result.changes !== 1) throw new AuthError(401, 'unauthorized', 'Display was not found')
+    return credential
+  }
+
   list(): DisplayDevice[] {
     return this.credentials.all().map(rowToDisplay)
   }
@@ -452,13 +484,20 @@ export class ParentDeviceService {
  *
  * The credential between redemption and collection is held **in memory only**,
  * never written to disk in any form. A server restart mid-ceremony therefore
- * forfeits that adoption: the screen's next claim reports `expired`, it mints a
- * fresh code, and the parent scans again. That is the safe failure, and it is
- * preferred to persisting a plaintext credential for five minutes.
+ * used to forfeit that adoption, because the credential waited in server memory
+ * between the phone's redeem and the screen's collection - and a Portainer
+ * redeploy is a restart, so the normal way changes shipped also stranded any
+ * screen scanned around the same time as a registered-but-never-seen row.
+ *
+ * Now nothing waits anywhere. Redeem registers the display with a credential
+ * hash nobody holds a preimage for; the screen's claim mints the real
+ * credential in the moment it hands it over, and `collected_at` makes that
+ * single-use. The enrolment row in SQLite is the whole hand-off, so a restart in
+ * the gap loses nothing, and a screen that never comes back is provable - a
+ * redeemed row past its collection window with no `collected_at` - and its
+ * useless display row is swept.
  */
 export class DisplayEnrolmentService {
-  /** Enrolment row id -> the display credential awaiting its screen. */
-  private readonly pendingCredentials = new Map<string, { credential: string, collectBy: number }>()
   private readonly mintAttempts = new AttemptWindow(ENROLMENT_MINT_LIMIT, ENROLMENT_RATE_WINDOW_MS)
   private readonly redeemFailures = new AttemptWindow(ENROLMENT_REDEEM_FAILURE_LIMIT, ENROLMENT_RATE_WINDOW_MS)
 
@@ -509,25 +548,36 @@ export class DisplayEnrolmentService {
     this.sweep(nowMs)
     const presented = hashSecret(pollToken)
     const row = this.sqlite.prepare(
-      'SELECT id, poll_token_hash, expires_at, redeemed_at, display_id FROM display_enrolment_codes WHERE poll_token_hash = ?'
-    ).get(presented) as { id: string, poll_token_hash: Buffer, expires_at: string, redeemed_at: string | null, display_id: string | null } | undefined
+      'SELECT id, poll_token_hash, expires_at, redeemed_at, collected_at, display_id FROM display_enrolment_codes WHERE poll_token_hash = ?'
+    ).get(presented) as { id: string, poll_token_hash: Buffer, expires_at: string, redeemed_at: string | null, collected_at: string | null, display_id: string | null } | undefined
     if (row === undefined || !safeEqual(presented, row.poll_token_hash)) return { status: 'expired' }
 
     if (row.redeemed_at === null) {
       return Date.parse(row.expires_at) <= nowMs ? { status: 'expired' } : { status: 'pending' }
     }
 
-    const pending = this.pendingCredentials.get(row.id)
-    if (pending === undefined || row.display_id === null) return { status: 'expired' }
+    // Single use, and only within the collection window: a captured claim
+    // cannot be replayed into a second credential, and a screen that took an
+    // hour to come back gets a fresh code rather than a stale adoption.
+    if (row.collected_at !== null || row.display_id === null) return { status: 'expired' }
+    if (Date.parse(row.redeemed_at) + ENROLMENT_COLLECTION_WINDOW_MS <= nowMs) return { status: 'expired' }
     const display = this.displays.find(row.display_id)
     // Revoked between adoption and collection: the credential would be inert
     // anyway, and handing it over would only confuse the screen.
-    if (display === undefined || display.revokedAt !== null) {
-      this.pendingCredentials.delete(row.id)
-      return { status: 'expired' }
-    }
-    this.pendingCredentials.delete(row.id)
-    return { status: 'adopted', credential: pending.credential, display }
+    if (display === undefined || display.revokedAt !== null) return { status: 'expired' }
+
+    // Mint in the same transaction that marks the row collected, conditioned on
+    // it not already being so: two claims racing the same token get one
+    // credential between them, never two.
+    const credential = this.sqlite.transaction((): string | null => {
+      const marked = this.sqlite.prepare(
+        'UPDATE display_enrolment_codes SET collected_at = ? WHERE id = ? AND collected_at IS NULL'
+      ).run(new Date(nowMs).toISOString(), row.id)
+      if (marked.changes !== 1) return null
+      return this.displays.issueCredential(display.id)
+    })()
+    if (credential === null) return { status: 'expired' }
+    return { status: 'adopted', credential, display }
   }
 
   /**
@@ -550,8 +600,9 @@ export class DisplayEnrolmentService {
       throw new AuthError(401, 'unauthorized', ENROLMENT_REFUSAL)
     }
 
-    const registered = this.sqlite.transaction(() => {
-      const display = this.displays.register({ name })
+    const registered = this.sqlite.transaction((): DisplayDevice => {
+      // No credential exists yet. The screen mints its own when it collects.
+      const display = this.displays.registerAwaitingCredential({ name })
       // Conditioned on `redeemed_at IS NULL` so two phones racing the same code
       // cannot both register a screen: the loser's update matches nothing and
       // the whole transaction, registration included, rolls back.
@@ -562,8 +613,7 @@ export class DisplayEnrolmentService {
       return display
     })()
 
-    this.pendingCredentials.set(row.id, { credential: registered.credential, collectBy: nowMs + ENROLMENT_COLLECTION_WINDOW_MS })
-    return this.displays.find(registered.id)!
+    return registered
   }
 
   /**
@@ -572,11 +622,19 @@ export class DisplayEnrolmentService {
    * years should not accumulate them.
    */
   private sweep(nowMs: number): void {
+    // A display that was redeemed but never collected within the window holds a
+    // credential hash nobody has a preimage for. It can never connect, and on
+    // the phone it reads as "registered, not connected" for ever. Remove it;
+    // the enrolment row cascades with it. Displays registered by the older
+    // A03 link path have no enrolment row and are untouched.
+    this.sqlite.prepare(`
+      DELETE FROM devices WHERE last_seen_at IS NULL AND revoked_at IS NULL AND id IN (
+        SELECT display_id FROM display_enrolment_codes
+        WHERE display_id IS NOT NULL AND redeemed_at IS NOT NULL AND collected_at IS NULL AND redeemed_at <= ?
+      )
+    `).run(new Date(nowMs - ENROLMENT_COLLECTION_WINDOW_MS).toISOString())
     this.sqlite.prepare('DELETE FROM display_enrolment_codes WHERE expires_at <= ?')
       .run(new Date(nowMs - ENROLMENT_ROW_RETENTION_MS).toISOString())
-    for (const [id, pending] of this.pendingCredentials) {
-      if (pending.collectBy <= nowMs) this.pendingCredentials.delete(id)
-    }
   }
 }
 

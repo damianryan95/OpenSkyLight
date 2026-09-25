@@ -355,3 +355,86 @@ describe('screen-displayed QR enrolment', () => {
     db.close()
   })
 })
+
+/**
+ * The hand-off between the phone's redeem and the screen's collection used to
+ * live in server memory, so the normal way changes ship — a redeploy, which is
+ * a restart — stranded any screen scanned around the same time as a display
+ * that was "registered, not connected" for ever. The row in SQLite is now the
+ * whole hand-off.
+ */
+describe('an adoption survives what happens between scan and collection', () => {
+  it('is collected after a server restart, exactly as if nothing happened', async () => {
+    const { db, deps, displays } = harness()
+    const parent = await parentBearer(deps)
+    const minted = await mint(deps)
+    expect((await enrol(deps, parent, minted.code, 'Kitchen')).status).toBe(201)
+
+    // A restart: a brand-new service instance over the same database, with
+    // nothing carried across but what SQLite holds.
+    const restarted = { ...deps, displayEnrolment: new DisplayEnrolmentService(db.sqlite, displays, { now: () => new Date('2026-09-24T09:00:30.000Z') }) }
+    const collected = JSON.parse((await claim(restarted, minted.pollToken)).body) as { status: string, credential: string }
+    expect(collected.status).toBe('adopted')
+
+    // And it is a real credential on the very display the phone registered.
+    const session = await call('GET', '/api/v1/display/session', { authorization: `Bearer ${collected.credential}` }, undefined, deps)
+    expect(session.status).toBe(200)
+    expect(JSON.parse(session.body).display.name).toBe('Kitchen')
+    db.close()
+  })
+
+  it('never lets the not-yet-collected display authenticate as anything', async () => {
+    const { db, deps } = harness()
+    const parent = await parentBearer(deps)
+    const minted = await mint(deps)
+    const adopted = JSON.parse((await enrol(deps, parent, minted.code, 'Kitchen')).body) as { id: string }
+    // Between redeem and collection the row exists, but its credential hash has
+    // no preimage anybody holds. The listing is honest about that state.
+    const listed = JSON.parse((await call('GET', '/api/v1/displays', parent, undefined, deps)).body).displays as { id: string, lastSeenAt: string | null }[]
+    expect(listed).toEqual([expect.objectContaining({ id: adopted.id, lastSeenAt: null })])
+    db.close()
+  })
+
+  it('sweeps a display no screen ever came back for, so the phone stops showing it', async () => {
+    const { db, deps, advance } = harness()
+    const parent = await parentBearer(deps)
+    const minted = await mint(deps)
+    expect((await enrol(deps, parent, minted.code, 'Kitchen')).status).toBe(201)
+    expect(JSON.parse((await call('GET', '/api/v1/displays', parent, undefined, deps)).body).displays).toHaveLength(1)
+
+    // Inside the collection window it is still legitimately waiting.
+    advance(4 * 60 * 1000)
+    await mint(deps)
+    expect(JSON.parse((await call('GET', '/api/v1/displays', parent, undefined, deps)).body).displays).toHaveLength(1)
+
+    // Past it, it is provably dead: nobody can ever hold its credential. The
+    // next mint or claim sweeps it, enrolment row and all.
+    advance(2 * 60 * 1000)
+    await mint(deps)
+    expect(JSON.parse((await call('GET', '/api/v1/displays', parent, undefined, deps)).body).displays).toHaveLength(0)
+    // And the stale poll token gets the same answer as any dead code.
+    expect(JSON.parse((await claim(deps, minted.pollToken)).body)).toEqual({ status: 'expired' })
+    db.close()
+  })
+
+  it('leaves a display registered the older way alone, even though it too has never connected', async () => {
+    const { db, deps, advance } = harness()
+    const parent = await parentBearer(deps)
+    // The A03 path: registered with a credential the parent carries to the screen.
+    expect((await call('POST', '/api/v1/displays', parent, { name: 'Study' }, deps)).status).toBe(201)
+    advance(60 * 60 * 1000)
+    await mint(deps)
+    expect(JSON.parse((await call('GET', '/api/v1/displays', parent, undefined, deps)).body).displays).toEqual([expect.objectContaining({ name: 'Study', lastSeenAt: null })])
+    db.close()
+  })
+
+  it('refuses collection once the window has passed, so a stale adoption is not revived', async () => {
+    const { db, deps, advance } = harness()
+    const parent = await parentBearer(deps)
+    const minted = await mint(deps)
+    expect((await enrol(deps, parent, minted.code, 'Kitchen')).status).toBe(201)
+    advance(5 * 60 * 1000 + 1)
+    expect(JSON.parse((await claim(deps, minted.pollToken)).body)).toEqual({ status: 'expired' })
+    db.close()
+  })
+})

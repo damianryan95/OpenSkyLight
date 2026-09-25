@@ -2,11 +2,23 @@ import { useEffect, useReducer, useRef, useState } from 'react'
 import { claimEnrolment, persistDisplayCredential, requestEnrolmentCode } from '../../api/browser'
 import {
   ENROLMENT_POLL_INTERVAL_MS,
+  ENROLMENT_RESUME_KEY,
   enrolmentReducer,
   initialEnrolmentState,
   isLocallyExpired,
+  restoreEnrolment,
   type EnrolmentState
 } from './enrolment'
+
+function readResume(): ReturnType<typeof restoreEnrolment> {
+  try { return restoreEnrolment(localStorage.getItem(ENROLMENT_RESUME_KEY), Date.now()) } catch { return null }
+}
+function writeResume(code: string, pollToken: string, expiresAt: string): void {
+  try { localStorage.setItem(ENROLMENT_RESUME_KEY, JSON.stringify({ code, pollToken, expiresAt })) } catch { /* a screen with no storage still works, it just re-mints */ }
+}
+function clearResume(): void {
+  try { localStorage.removeItem(ENROLMENT_RESUME_KEY) } catch { /* nothing to clear */ }
+}
 
 /**
  * Drives the enrolment state machine against the server.
@@ -16,8 +28,11 @@ import {
  * the public code and nothing else.
  */
 export function useEnrolment(): { state: EnrolmentState; now: number } {
-  const [state, dispatch] = useReducer(enrolmentReducer, initialEnrolmentState)
-  const pollToken = useRef<string | null>(null)
+  // Resume the code this screen was already showing, if any: a reload must not
+  // abandon an adoption a parent may have just made against it.
+  const resumed = useRef(readResume())
+  const [state, dispatch] = useReducer(enrolmentReducer, resumed.current?.state ?? initialEnrolmentState)
+  const pollToken = useRef<string | null>(resumed.current?.pollToken ?? null)
   const [now, setNow] = useState(() => Date.now())
 
   const phase = state.phase
@@ -35,6 +50,7 @@ export function useEnrolment(): { state: EnrolmentState; now: number } {
         const grant = await requestEnrolmentCode(controller.signal)
         if (cancelled) return
         pollToken.current = grant.pollToken
+        writeResume(grant.code, grant.pollToken, grant.expiresAt)
         dispatch({ type: 'minted', code: grant.code, expiresAt: grant.expiresAt })
       } catch {
         // The body is never inspected or surfaced: a remote error can echo
@@ -70,10 +86,11 @@ export function useEnrolment(): { state: EnrolmentState; now: number } {
           // else in this component gets the chance to fail.
           persistDisplayCredential(claim.credential, claim.display.id)
           pollToken.current = null
+          clearResume()
           dispatch({ type: 'adopted', displayName: claim.display.name })
           return
         }
-        if (claim.status === 'expired') { pollToken.current = null; dispatch({ type: 'expired' }); return }
+        if (claim.status === 'expired') { pollToken.current = null; clearResume(); dispatch({ type: 'expired' }); return }
         dispatch({ type: 'poll_pending' })
       } catch {
         if (cancelled) return
@@ -95,7 +112,7 @@ export function useEnrolment(): { state: EnrolmentState; now: number } {
       // chance to: a code redeemed just before expiry still has a credential
       // waiting against this poll token, and dropping it would register a
       // display that never collects one.
-      if (isLocallyExpired(expiresAt, current)) dispatch({ type: 'expired' })
+      if (isLocallyExpired(expiresAt, current)) { clearResume(); dispatch({ type: 'expired' }) }
     }, 1_000)
     return () => window.clearInterval(interval)
   }, [expiresAt])

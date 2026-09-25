@@ -45,10 +45,19 @@ existed. Photographing the wall yields nothing.
   registered on the server that never collects its credential — a screen stuck
   on a QR forever. The screen lets the *server* rule on expiry and only rotates
   on its own clock after a grace period.
-- **A restart mid-ceremony forfeits an adoption.** The credential between
-  redemption and collection is held in memory, because writing a plaintext
-  credential to disk would be worse. The screen re-mints; the household is left
-  with one spare display row to delete.
+- **A restart mid-ceremony no longer forfeits an adoption** (fixed 2026-09-25).
+  It used to: the credential waited in server memory between the phone's redeem
+  and the screen's collection, and a Portainer redeploy is a restart, so the
+  normal way changes shipped stranded any screen scanned at the same time as a
+  display that read "registered, not connected" for ever. Now redeem registers
+  the display with a credential hash nobody holds a preimage for, and the
+  screen's claim **mints** the real credential in the moment it collects it;
+  `collected_at` keeps that single-use. The SQLite row is the whole hand-off.
+  Nothing plaintext is ever written or parked. A redeemed row past its
+  collection window with no `collected_at` is provably dead and its display row
+  is swept on the next mint or claim. The screen also resumes the code it was
+  showing across a reload (`osl.enrolmentInProgress`), so refreshing a wall to
+  pick up a deployment cannot orphan a scan made seconds earlier.
 - **`minSdk` moved 24 → 26** for the scanner library. The override that would
   avoid it warns of runtime failures.
 - **No real camera has scanned it.** The payload is unit-tested against the

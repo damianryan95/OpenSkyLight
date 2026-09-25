@@ -99,6 +99,40 @@ export type EnrolmentAction =
 
 export const initialEnrolmentState: EnrolmentState = { phase: 'minting', attempt: 0 }
 
+/** Where a screen keeps the code it is currently showing, so a refresh or a
+ * browser restart resumes it instead of minting a new one. */
+export const ENROLMENT_RESUME_KEY = 'osl.enrolmentInProgress'
+
+export interface PendingEnrolment {
+  code: string
+  pollToken: string
+  expiresAt: string
+}
+
+/**
+ * The code a screen was showing before it was reloaded, if it is still worth
+ * showing.
+ *
+ * A parent may have scanned it seconds ago; abandoning it for a fresh one would
+ * strand that adoption on the server as a display that never connects — which
+ * is exactly what happened when screens were refreshed to pick up a deploy.
+ * The poll token stays on the screen's own device, which is where ADR 0006
+ * says it must live; a reload is not it leaving.
+ */
+export function restoreEnrolment(stored: string | null, now: number): { state: EnrolmentState; pollToken: string } | null {
+  if (stored === null) return null
+  try {
+    const parsed: unknown = JSON.parse(stored)
+    if (typeof parsed !== 'object' || parsed === null) return null
+    const { code, pollToken, expiresAt } = parsed as Partial<PendingEnrolment>
+    if (typeof code !== 'string' || typeof pollToken !== 'string' || typeof expiresAt !== 'string') return null
+    if (isLocallyExpired(expiresAt, now)) return null
+    return { state: { phase: 'showing', code, expiresAt }, pollToken }
+  } catch {
+    return null
+  }
+}
+
 export function enrolmentReducer(state: EnrolmentState, action: EnrolmentAction): EnrolmentState {
   // Adoption is terminal: a late poll response must never take a registered
   // screen back to a QR it has already given away.

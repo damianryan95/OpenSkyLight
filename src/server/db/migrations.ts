@@ -446,6 +446,14 @@ const migrations: readonly string[] = [
       resolved_at TEXT
     );
     CREATE INDEX idx_event_conflicts_open ON event_conflicts(detected_at) WHERE resolved_at IS NULL;
+  `,
+
+  // 014 - the enrolment hand-off lives entirely in this row. A display's
+  // credential is minted when its screen collects it, not when the phone
+  // redeems, so nothing waits in server memory between the two and a restart
+  // in that gap loses nothing. collected_at is what keeps the release single-use.
+  `
+    ALTER TABLE display_enrolment_codes ADD COLUMN collected_at TEXT;
   `
 ]
 

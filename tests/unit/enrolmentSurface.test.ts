@@ -7,6 +7,7 @@ import {
   initialEnrolmentState,
   isLocallyExpired,
   millisecondsRemaining,
+  restoreEnrolment,
   retryDelayMs,
   type EnrolmentAction,
   type EnrolmentState
@@ -149,5 +150,31 @@ describe('enrolment state machine', () => {
     const offline = enrolmentReducer(initialEnrolmentState, { type: 'mint_failed' })
     expect(enrolmentReducer(offline, { type: 'expired' })).toBe(offline)
     expect(enrolmentReducer(initialEnrolmentState, { type: 'mint' })).toBe(initialEnrolmentState)
+  })
+})
+
+describe('resuming the code a screen was showing before it reloaded', () => {
+  const now = Date.parse('2026-09-25T10:00:00.000Z')
+  const stored = JSON.stringify({ code: 'K7M2QX4A', pollToken: 'a-poll-token', expiresAt: '2026-09-25T10:04:00.000Z' })
+
+  it('picks up the same code and poll token, so an adoption made a moment ago still lands', () => {
+    // Abandoning it would leave a display registered on the server that no
+    // screen ever collects — which is exactly what refreshing screens to pick
+    // up a deployment used to do.
+    expect(restoreEnrolment(stored, now)).toEqual({
+      state: { phase: 'showing', code: 'K7M2QX4A', expiresAt: '2026-09-25T10:04:00.000Z' },
+      pollToken: 'a-poll-token'
+    })
+  })
+
+  it('starts fresh once the stored code is past its grace, rather than showing a dead QR', () => {
+    expect(restoreEnrolment(stored, now + 5 * 60_000)).toBeNull()
+  })
+
+  it('starts fresh from nothing, or from anything it cannot read', () => {
+    expect(restoreEnrolment(null, now)).toBeNull()
+    expect(restoreEnrolment('not json', now)).toBeNull()
+    expect(restoreEnrolment(JSON.stringify({ code: 'K7M2QX4A' }), now)).toBeNull()
+    expect(restoreEnrolment(JSON.stringify(null), now)).toBeNull()
   })
 })
