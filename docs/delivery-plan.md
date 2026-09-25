@@ -123,6 +123,12 @@ the QR carries the server address; `N03` still matters for the browser.
 
 Sequence: `N03` → `N18` → (`O02` evidence) → `N02` → `N04` → `O04` closes out.
 
+**`N04` pulled forward, 2026-09-25.** Its discovery steps (`N02` access point,
+`N03` name) are hardware-gated, but the wizard itself is not: `N18`'s QR carries
+the server address, and a typed address works today. The first-run flow was
+built on those two entries, with `N18` case 1 unblocked to make it possible.
+`N02`/`N03` still owe the "no address to type" half.
+
 **Exit criteria:** `O02` and `O04` both move off blocked with recorded hardware
 results, and the wizard path is proven end-to-end on a factory image.
 

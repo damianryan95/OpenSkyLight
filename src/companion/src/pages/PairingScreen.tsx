@@ -1,7 +1,9 @@
 import { useState, type FormEvent } from 'react'
-import { ApiError, connectToHousehold, getApiBaseUrl, type ParentAuthStatus } from '../api/client'
+import { ApiError, connectToHousehold, getApiBaseUrl, probeHousehold, type ParentAuthStatus } from '../api/client'
+import type { EnrolmentScan } from '../api/enrolment'
 import { Card, PrimaryButton } from '../components/ui'
 import { AddScreenFlow } from './AddScreenFlow'
+import { HouseholdSetupFlow } from './HouseholdSetupFlow'
 import { scannerAvailable } from '../api/enrolmentScanner'
 
 const DEFAULT_ADDRESS = 'http://openskylight.local:3000'
@@ -27,7 +29,32 @@ export function PairingScreen({ onPaired }: { onPaired: (status: ParentAuthStatu
   // asking them to read one off a wall is the failure ADR 0006 exists to remove.
   // Scanning a screen supplies the address and adds that screen in one go.
   const [scanning, setScanning] = useState(false)
+  // Case 1 of ADR 0006: the household this phone has just met has no PIN yet.
+  // Whether it arrived by scan (with a screen to add) or by a typed address
+  // (without), the same first-run flow takes over from here.
+  const [setup, setSetup] = useState<{ serverAddress: string; scan: EnrolmentScan | null } | null>(null)
   const isValid = address.trim().length > 0 && name.trim().length > 0 && /^\d{4,64}$/.test(pin)
+
+  /** Asks the box whether anyone has set it up. A brand-new one has no PIN to
+   * connect with, so the parent is offered to create one rather than told to
+   * find a browser. */
+  const startSetup = async () => {
+    if (busy || address.trim() === '') return
+    setBusy(true)
+    setError(null)
+    try {
+      const status = await probeHousehold(address)
+      if (status.configured) {
+        setError('That OpenSkyLight is already set up. Connect to it with its household PIN below instead.')
+        return
+      }
+      setSetup({ serverAddress: address.trim(), scan: null })
+    } catch {
+      setError(`Nothing answered at ${address.trim()}. Check the address, and check this phone is on the same home Wi-Fi as the OpenSkyLight box rather than mobile data.`)
+    } finally {
+      setBusy(false)
+    }
+  }
 
   const submit = async (event: FormEvent) => {
     event.preventDefault()
@@ -35,6 +62,14 @@ export function PairingScreen({ onPaired }: { onPaired: (status: ParentAuthStatu
     setBusy(true)
     setError(null)
     try {
+      // A PIN typed against a household that has none cannot be checked — but it
+      // must not silently become the household's PIN either. Send the parent
+      // through setup, where they choose one deliberately and confirm it.
+      const status = await probeHousehold(address)
+      if (!status.configured) {
+        setSetup({ serverAddress: address.trim(), scan: null })
+        return
+      }
       onPaired(await connectToHousehold(address, pin, name.trim()))
     } catch (reason) {
       // What was typed stays in the form: a failed attempt should cost a retap,
@@ -45,11 +80,29 @@ export function PairingScreen({ onPaired }: { onPaired: (status: ParentAuthStatu
     }
   }
 
+  if (setup !== null) {
+    return (
+      <main className="mx-auto flex min-h-full w-full max-w-md items-center p-5" style={{ paddingTop: 'max(1.25rem, env(safe-area-inset-top))', paddingBottom: 'max(1.25rem, env(safe-area-inset-bottom))' }}>
+        <HouseholdSetupFlow
+          serverAddress={setup.serverAddress}
+          scan={setup.scan}
+          initialPhoneName={name}
+          onComplete={onPaired}
+          onCancel={() => { setSetup(null); setScanning(false) }}
+        />
+      </main>
+    )
+  }
+
   if (scanning) {
     return (
       <main className="mx-auto flex min-h-full w-full max-w-md items-center p-5" style={{ paddingTop: 'max(1.25rem, env(safe-area-inset-top))', paddingBottom: 'max(1.25rem, env(safe-area-inset-bottom))' }}>
         <div className="w-full">
-          <AddScreenFlow onPaired={onPaired} onClose={() => setScanning(false)} />
+          <AddScreenFlow
+            onPaired={onPaired}
+            onClaimHousehold={(serverAddress, scan) => setSetup({ serverAddress, scan })}
+            onClose={() => setScanning(false)}
+          />
         </div>
       </main>
     )
@@ -75,6 +128,16 @@ export function PairingScreen({ onPaired }: { onPaired: (status: ParentAuthStatu
             </button>
           </div>
         )}
+
+        <div className="mt-5 rounded-xl bg-paper-deep p-4">
+          <p className="text-base leading-6 font-bold">Setting up a new OpenSkyLight?</p>
+          <p className="mt-1 text-sm leading-5 text-ink-soft">
+            If nobody has set up the box yet, there is no PIN to connect with. Enter its address below, then this phone will create the household — no browser needed.
+          </p>
+          <button type="button" className="pressable mt-3 min-h-12 w-full rounded-xl bg-paper px-4 text-base font-extrabold text-ink-soft" onClick={() => void startSetup()} disabled={busy || address.trim() === ''}>
+            Set up a new household
+          </button>
+        </div>
 
         <form className="mt-6 space-y-5" onSubmit={submit} noValidate>
           <label className="block">
@@ -154,11 +217,11 @@ function explain(reason: unknown, address: string): string {
       ? 'Too many attempts have been made. Wait a minute, then try again.'
       : `Too many attempts have been made. Wait ${reason.retryAfterSeconds} seconds, then try again.`
   }
-  // This household has never had a PIN set. The app cannot do first-run setup
-  // — it has nothing to authenticate with until a PIN exists — so say where it
-  // is done rather than leaving a parent retrying a PIN that cannot work yet.
+  // The probe above should have caught this, so reaching here means the
+  // household lost its PIN between the two requests — which does not happen.
+  // Say the useful thing anyway rather than something about browsers.
   if (reason.status === 409) {
-    return `This household has not been set up yet. Open ${address.trim()}/admin/ in a browser, choose a household PIN there, then come back and connect this phone.`
+    return 'This household has not been set up yet, so there is no PIN to connect with. Choose Set up a new household above.'
   }
   if (reason.status === 404) {
     return `Something answered at ${address.trim()}, but it does not offer phone pairing. Either that is not the OpenSkyLight server, or the server is running an older version than this app.`

@@ -97,17 +97,20 @@ export function PrimaryButton({
 export function GhostButton({
   children,
   onClick,
+  disabled,
   type = 'button'
 }: {
   children: ReactNode
   onClick?: () => void
+  disabled?: boolean
   type?: 'button' | 'submit'
 }) {
   return (
     <button
       type={type}
       onClick={onClick}
-      className="pressable min-h-11 rounded-xl bg-paper-deep px-4 text-base font-extrabold text-ink-soft"
+      disabled={disabled}
+      className="pressable min-h-11 rounded-xl bg-paper-deep px-4 text-base font-extrabold text-ink-soft disabled:opacity-40"
     >
       {children}
     </button>

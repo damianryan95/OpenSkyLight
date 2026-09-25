@@ -56,6 +56,23 @@ bearer credential. A stolen phone therefore cannot mint itself a spare
 credential, which is what makes revoking it genuinely final rather than
 theatre.
 
+## How case 1 is implemented (added 2026-09-25)
+
+Case 1 is served by a dedicated `POST /api/v1/household/claim` rather than by
+loosening `/api/v1/auth/setup`. One request sets the PIN and pairs the calling
+phone in one transaction, and returns the bearer credential the phone uses from
+then on. The browser's `setup` stays same-origin and untouched.
+
+The choice is deliberate. `setup` mints a cookie session, which is useless to
+an app; a phone needs a parent-device bearer, and getting one in a single round
+trip means there is never a half-state — a household with a PIN that no device
+can use, or a paired device on a household with no PIN — because a failure in
+either half rolls the other back. The route's guards are the ones pairing
+already relies on: JSON is demanded so a hostile page cannot drive it without a
+preflight the server never answers, and once the household is configured it
+answers 409 for ever, which is also what settles two phones racing the same
+brand-new screen. `tests/unit/householdClaim.test.ts` pins each refusal.
+
 ## The residual risk, stated plainly
 
 Case 1 is trust-on-first-use: whoever scans a brand-new screen *first* claims

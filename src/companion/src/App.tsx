@@ -17,7 +17,8 @@ import {
 } from './api/client'
 import { cancelPhoneCalendarSync, startPhoneCalendarSyncTriggers } from './api/phoneCalendarSync'
 import { peekPendingEnrolmentCode } from './api/pendingEnrolment'
-import { Card, GhostButton, PrimaryButton, TextInput } from './components/ui'
+import { Card, PrimaryButton } from './components/ui'
+import { LocationPicker, emptyLocation, locationToSettings, type LocationValue } from './components/LocationPicker'
 import { PeopleCalendarsPage } from './pages/PeopleCalendarsPage'
 import { ChoresRewardsAdminPage } from './pages/ChoresRewardsAdminPage'
 import { ListsMealsAdminPage } from './pages/ListsMealsAdminPage'
@@ -162,11 +163,33 @@ export default function App() {
 }
 
 function WeatherLocation() {
-  const [label, setLabel] = useState(''); const [lat, setLat] = useState(''); const [lon, setLon] = useState(''); const [timezone, setTimezone] = useState(''); const [saved, setSaved] = useState(false); const [error, setError] = useState<string | null>(null); const [results, setResults] = useState<Array<{ label: string; lat: number; lon: number }>>([]); const [searching, setSearching] = useState(false)
-  useEffect(() => { void parentGet<{ timezone: string; weather: { label: string; lat: number; lon: number } | null }>('/api/v1/household/settings').then((settings) => { setTimezone(settings.timezone); if (settings.weather) { setLabel(settings.weather.label); setLat(String(settings.weather.lat)); setLon(String(settings.weather.lon)) } }).catch(() => undefined) }, [])
-  const save = async (event: FormEvent) => { event.preventDefault(); setSaved(false); setError(null); const parsedLat = Number(lat); const parsedLon = Number(lon); if (!timezone.trim() || !label.trim() || !Number.isFinite(parsedLat) || !Number.isFinite(parsedLon)) { setError('Enter a valid IANA timezone, location name, latitude, and longitude.'); return }; try { await parentMutation('/api/v1/household/settings', 'PATCH', { timezone: timezone.trim(), weather: { label, lat: parsedLat, lon: parsedLon } }); setSaved(true) } catch (reason) { setError(reason instanceof ApiError ? reason.message : 'Could not save household settings.') } }
-  const search = async () => { if (label.trim().length < 2) return; setSearching(true); setError(null); try { setResults((await parentGet<{ locations: Array<{ label: string; lat: number; lon: number }> }>(`/api/v1/weather/locations?q=${encodeURIComponent(label)}`)).locations) } catch (reason) { setError(reason instanceof ApiError ? reason.message : 'Could not search locations.') } finally { setSearching(false) } }
-  return <Card className="mt-4"><form className="space-y-3" onSubmit={save}><h2 className="font-display text-xl font-semibold">Household location & time</h2><p className="text-sm leading-5 text-ink-soft">This timezone controls the household day used by chore completion and all displays.</p><label className="block"><span className="mb-1 block text-sm font-extrabold">Time zone</span><TextInput value={timezone} onChange={(value) => { setTimezone(value); setSaved(false) }} placeholder="e.g. Australia/Perth" /></label><label className="block"><span className="mb-1 block text-sm font-extrabold">Town or city</span><div className="flex gap-2"><TextInput value={label} onChange={(value) => { setLabel(value); setSaved(false) }} placeholder="e.g. Fremantle" /><GhostButton onClick={() => void search()}>{searching ? 'Searching…' : 'Search'}</GhostButton></div></label>{results.length > 0 && <div className="overflow-hidden rounded-xl border border-line">{results.map((result) => <button key={`${result.lat},${result.lon}`} type="button" className="block min-h-11 w-full border-b border-line px-3 py-2 text-left font-semibold last:border-0 hover:bg-paper-deep" onClick={() => { setLabel(result.label); setLat(String(result.lat)); setLon(String(result.lon)); setResults([]); setSaved(false) }}>{result.label}<span className="block text-xs text-ink-faint">{result.lat.toFixed(3)}, {result.lon.toFixed(3)}</span></button>)}</div>}<details><summary className="cursor-pointer text-sm font-extrabold text-ink-soft">Advanced coordinates</summary><div className="mt-2 grid grid-cols-2 gap-2"><label className="text-sm font-extrabold">Latitude<TextInput value={lat} onChange={setLat} inputMode="text" placeholder="-32.056" /></label><label className="text-sm font-extrabold">Longitude<TextInput value={lon} onChange={setLon} inputMode="text" placeholder="115.745" /></label></div></details><GhostButton onClick={() => navigator.geolocation?.getCurrentPosition((position) => { setLat(String(position.coords.latitude)); setLon(String(position.coords.longitude)); setSaved(false); setResults([]) }, () => setError('Location permission was not available. Search instead.'))}>Use this phone’s coordinates</GhostButton>{error && <p className="text-sm font-bold text-red-800">{error}</p>}{saved && <p className="text-sm font-bold text-green-800">Household settings saved.</p>}<PrimaryButton type="submit">Save household settings</PrimaryButton></form></Card>
+  const [location, setLocation] = useState<LocationValue>(() => emptyLocation())
+  const [saved, setSaved] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  useEffect(() => {
+    void parentGet<{ timezone: string; weather: { label: string; lat: number; lon: number } | null }>('/api/v1/household/settings')
+      .then((settings) => setLocation({
+        timezone: settings.timezone,
+        label: settings.weather?.label ?? '',
+        lat: settings.weather === null ? '' : String(settings.weather.lat),
+        lon: settings.weather === null ? '' : String(settings.weather.lon)
+      }))
+      .catch(() => undefined)
+  }, [])
+  const save = async (event: FormEvent) => {
+    event.preventDefault()
+    setSaved(false)
+    setError(null)
+    const parsed = locationToSettings(location)
+    if (!parsed.ok) { setError(parsed.message); return }
+    try {
+      await parentMutation('/api/v1/household/settings', 'PATCH', parsed.settings)
+      setSaved(true)
+    } catch (reason) {
+      setError(reason instanceof ApiError ? reason.message : 'Could not save household settings.')
+    }
+  }
+  return <Card className="mt-4"><form className="space-y-3" onSubmit={save}><h2 className="font-display text-xl font-semibold">Household location & time</h2><p className="text-sm leading-5 text-ink-soft">This timezone controls the household day used by chore completion and all displays.</p><LocationPicker value={location} onChange={(next) => { setLocation(next); setSaved(false) }} />{error && <p className="text-sm font-bold text-red-800">{error}</p>}{saved && <p className="text-sm font-bold text-green-800">Household settings saved.</p>}<PrimaryButton type="submit">Save household settings</PrimaryButton></form></Card>
 }
 
 function LoadingScreen() {

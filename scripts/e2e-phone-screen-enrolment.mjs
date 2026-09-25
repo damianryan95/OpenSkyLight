@@ -34,6 +34,9 @@ let cookieSession = false
 const displays = []
 const parentDevices = []
 const enrolAttempts = []
+const people = []
+let householdPin = PIN
+const settingsPatches = []
 
 const json = (response, status, body) => { response.setHeader('content-type', 'application/json'); response.writeHead(status).end(JSON.stringify(body)) }
 const body = async (request) => { let value = ''; for await (const chunk of request) value += chunk; return value ? JSON.parse(value) : {} }
@@ -45,16 +48,30 @@ const server = createServer(async (request, response) => {
   const authenticated = bearer === CREDENTIAL || Boolean(cookie)
 
   if (url.pathname === '/api/v1/auth/status') return json(response, 200, { configured, authenticated, expiresAt: null })
+  // ADR 0006 case 1. Sets the PIN and pairs the phone in one act, and is a 409
+  // for ever afterwards - the property the whole ceremony rests on.
+  if (url.pathname === '/api/v1/household/claim' && request.method === 'POST') {
+    if (!(request.headers['content-type'] ?? '').includes('application/json')) return json(response, 415, { error: { code: 'bad_request', message: 'JSON is required' } })
+    if (configured) return json(response, 409, { error: { code: 'conflict', message: 'Household PIN has already been configured' } })
+    const input = await body(request)
+    if (!/^\d{4,64}$/.test(input.pin ?? '')) return json(response, 401, { error: { code: 'unauthorized', message: 'PIN must contain 4 to 64 digits' } })
+    configured = true
+    householdPin = input.pin
+    const device = { id: `phone-${parentDevices.length + 1}`, name: input.name, pairedAt: '2030-01-01T00:00:00.000Z', lastSeenAt: null, revokedAt: null }
+    parentDevices.push(device)
+    return json(response, 201, { ...device, credential: CREDENTIAL })
+  }
   if (url.pathname === '/api/v1/auth/login' && request.method === 'POST') {
     const input = await body(request)
-    if (input.pin !== PIN) return json(response, 401, { error: { code: 'unauthorized', message: 'Invalid household PIN' } })
+    if (input.pin !== householdPin) return json(response, 401, { error: { code: 'unauthorized', message: 'Invalid household PIN' } })
     cookieSession = true
     response.setHeader('set-cookie', 'osl_parent_session=test-session; Path=/api/v1')
     return json(response, 200, { csrfToken: CSRF, expiresAt: '2030-01-01T00:00:00.000Z' })
   }
   if (url.pathname === '/api/v1/parent-devices' && request.method === 'POST') {
     const input = await body(request)
-    if (input.pin !== PIN) return json(response, 401, { error: { code: 'unauthorized', message: 'That PIN was not recognised' } })
+    if (!configured) return json(response, 409, { error: { code: 'conflict', message: 'Household PIN has not been configured' } })
+    if (input.pin !== householdPin) return json(response, 401, { error: { code: 'unauthorized', message: 'That PIN was not recognised' } })
     const device = { id: `phone-${parentDevices.length + 1}`, name: input.name, pairedAt: '2030-01-01T00:00:00.000Z', lastSeenAt: null, revokedAt: null }
     parentDevices.push(device)
     return json(response, 201, { ...device, credential: CREDENTIAL })
@@ -82,7 +99,20 @@ const server = createServer(async (request, response) => {
     return json(response, 201, { ...display, credential: 'a-display-credential' })
   }
   if (url.pathname === '/api/v1/parent-devices' && request.method === 'GET') return json(response, 200, { parentDevices })
-  if (url.pathname === '/api/v1/household/settings') return json(response, 200, { timezone: 'Australia/Perth', weather: null })
+  if (url.pathname === '/api/v1/household/settings' && request.method === 'PATCH') {
+    const input = await body(request)
+    settingsPatches.push(input)
+    return json(response, 200, { timezone: input.timezone ?? 'Australia/Perth', weather: input.weather ?? null })
+  }
+  if (url.pathname === '/api/v1/household/settings') return json(response, 200, { timezone: settingsPatches.at(-1)?.timezone ?? 'Australia/Perth', weather: settingsPatches.at(-1)?.weather ?? null })
+  if (url.pathname === '/api/v1/weather/locations') return json(response, 200, { locations: [{ label: 'Fremantle, Western Australia', lat: -32.056, lon: 115.745 }] })
+  if (url.pathname === '/api/v1/people' && request.method === 'GET') return json(response, 200, { people })
+  if (url.pathname === '/api/v1/people' && request.method === 'POST') {
+    const input = await body(request)
+    const person = { id: `person-${people.length + 1}`, name: input.name, color: input.color, role: input.role, sortOrder: people.length, avatarUrl: null, themeId: null, celebrationAssetId: null, celebrationAssetIds: [], celebrationEnabled: true, celebrationDurationMs: 3000 }
+    people.push(person)
+    return json(response, 201, person)
+  }
   if (url.pathname === '/api/v1/sync/status') return json(response, 200, { state: 'fresh', lastSyncedAt: null, lastSucceededAt: null, calendars: [] })
 
   // The browser bundle builds with base '/admin/', so its assets ask for that
@@ -110,7 +140,8 @@ try {
   await page.addInitScript(() => { window.androidBridge = { postMessage: () => {} } })
   await page.goto(origin)
 
-  // ---- Case 1: the household has no PIN at all. Say so; do not pretend.
+  // ---- Case 1: the household has no PIN at all. The scanning phone claims it
+  // and runs first-run setup - with no browser anywhere in the story.
   await page.getByRole('heading', { name: 'Connect this phone' }).waitFor()
   await page.getByRole('button', { name: 'Scan a screen instead' }).click()
   await page.getByRole('heading', { name: 'Add a screen' }).waitFor()
@@ -125,13 +156,71 @@ try {
   await page.getByLabel('Household server address').fill(origin)
   await page.getByLabel('Code from the screen').fill(GOOD_CODE)
   await page.getByRole('button', { name: 'Continue' }).click()
-  const unclaimed = await page.getByText('has not been set up yet').textContent()
-  if (!unclaimed.includes(`${origin}/admin/`)) throw new Error('an unclaimed household did not say where to go and set it up')
-  if (enrolAttempts.length !== 0) throw new Error('an unclaimed household had a code redeemed against it anyway')
-  await page.getByRole('button', { name: 'Close' }).click()
+  await page.getByRole('heading', { name: 'Set up your household' }).waitFor()
+  // Visible words, not markup: the bundle's own asset URLs legitimately carry
+  // the /admin/ base path, and what matters is what a parent is told to do.
+  const setupProse = await page.locator('main').innerText()
+  if (/\/admin\/|browser/i.test(setupProse)) throw new Error(`first-run setup still points a parent at a browser: ${setupProse.slice(0, 200)}`)
+  if (enrolAttempts.length !== 0) throw new Error('an unclaimed household had a code redeemed against it before it was claimed')
 
-  // ---- Case 3: the household has a PIN, this phone has not joined it.
-  configured = true
+  // Step 1: the PIN must be confirmed, and a mismatch must not be submittable.
+  await page.getByLabel('Household PIN').fill(PIN)
+  await page.getByLabel('Type the PIN again').fill('9999')
+  if (await page.getByRole('button', { name: 'Create the household' }).isEnabled()) throw new Error('mismatched PINs could be submitted')
+  await page.getByLabel('Type the PIN again').fill(PIN)
+  await page.getByLabel('A name for this phone').fill('Dad phone')
+  await page.getByLabel('Name for the screen you scanned').fill('Kitchen wall')
+  await noOverflow(page, 'the claim step')
+  await page.getByRole('button', { name: 'Create the household' }).click()
+
+  // Step 2: the phone's own zone is offered; accepting it is one tap.
+  await page.getByText('Step 2 of 4').waitFor()
+  if (!configured) throw new Error('the claim did not configure the household')
+  if (parentDevices.length !== 1 || parentDevices[0].name !== 'Dad phone') throw new Error('the claim did not pair the phone under the name given')
+  if (displays.length !== 1 || displays[0].name !== 'Kitchen wall') throw new Error('the scanned screen was not added by the claim')
+  if (await page.getByLabel('Time zone').inputValue() === '') throw new Error('the time zone was not prefilled from the phone')
+  await page.getByPlaceholder('e.g. Fremantle').fill('Fremantle')
+  await page.getByRole('button', { name: 'Search' }).click()
+  await page.getByRole('option', { name: /Fremantle/ }).click()
+  await noOverflow(page, 'the location step')
+  await page.getByRole('button', { name: 'Continue' }).click()
+
+  // Step 3: at least one person, and the button says why until there is one.
+  await page.getByText('Step 3 of 4').waitFor()
+  if (settingsPatches.length !== 1 || settingsPatches[0].weather?.label !== 'Fremantle, Western Australia') throw new Error('where the household lives was not saved')
+  if (await page.getByRole('button', { name: 'Add at least one person to continue' }).isEnabled()) throw new Error('setup could continue with nobody in the household')
+  await page.getByPlaceholder('Name').fill('Ava')
+  await page.getByRole('button', { name: 'Add this person' }).click()
+  await page.getByRole('list', { name: 'People added' }).getByText('Ava').waitFor()
+  if (people.length !== 1 || people[0].role !== 'child') throw new Error('the first person was not created as a child')
+  await noOverflow(page, 'the people step')
+  await page.getByRole('button', { name: 'Continue' }).click()
+
+  // Step 4: the scanned screen is already in; nothing more to do but look at it.
+  await page.getByText('Kitchen wall has joined the household').waitFor()
+  await page.getByRole('button', { name: 'Continue' }).click()
+  await page.getByRole('button', { name: 'Open the household' }).click()
+  await page.getByRole('heading', { level: 1, name: 'Home' }).waitFor()
+  if ((await page.content()).includes(CREDENTIAL)) throw new Error('the parent credential was rendered during setup')
+
+  // Re-run safety is a property of state, not a flag: a configured household
+  // that this phone re-meets must not be offered setup again.
+  await page.reload()
+  await page.getByRole('heading', { level: 1, name: 'Home' }).waitFor()
+  if (await page.getByRole('heading', { name: 'Set up your household' }).count() !== 0) throw new Error('a configured household re-entered first-run setup')
+
+  // ---- Case 3: the household has a PIN, and *another* phone has not joined it.
+  // Forget this phone's pairing to stand in for the second parent's phone.
+  await page.evaluate(() => { localStorage.clear(); sessionStorage.clear() })
+  await page.reload()
+  await page.getByRole('heading', { name: 'Connect this phone' }).waitFor()
+  // Trying to set up an already-configured household is refused in words, and
+  // the phone is pointed at the PIN instead.
+  await page.getByLabel('Household server address').fill(origin)
+  await page.getByRole('button', { name: 'Set up a new household' }).click()
+  const alreadySetUp = await page.getByRole('alert').textContent()
+  if (!/already set up/.test(alreadySetUp)) throw new Error(`a configured household could be re-set-up: ${alreadySetUp}`)
+  if (parentDevices.length !== 1) throw new Error('re-attempting setup paired a phone')
   await page.getByRole('button', { name: 'Scan a screen instead' }).click()
   await page.getByRole('button', { name: 'Type the code instead' }).click()
   await page.getByLabel('Household server address').fill(origin)
@@ -152,8 +241,8 @@ try {
   await page.getByLabel('Household PIN').fill(PIN)
   await page.getByRole('button', { name: 'Connect and add the screen' }).click()
   await page.getByText('Kitchen wall has joined the household').waitFor()
-  if (parentDevices.length !== 1 || parentDevices[0].name !== 'Mum phone') throw new Error('the scan did not pair the phone under the name the parent gave it')
-  if (displays.length !== 1 || displays[0].name !== 'Kitchen wall') throw new Error('the code did not register the screen')
+  if (parentDevices.length !== 2 || parentDevices[1].name !== 'Mum phone') throw new Error('the scan did not pair the phone under the name the parent gave it')
+  if (displays.length !== 2 || displays[1].name !== 'Kitchen wall') throw new Error('the code did not register the screen')
   // A hand-typed code with a space in it must reach the server normalised.
   if (enrolAttempts.at(-1).code !== GOOD_CODE) throw new Error(`a typed code reached the server as ${enrolAttempts.at(-1).code}`)
   await noOverflow(page, 'the pair-and-enrol step')
@@ -177,7 +266,7 @@ try {
   const codeRefusal = await page.getByRole('alert').textContent()
   if (!/expired/.test(codeRefusal) || !/screen/.test(codeRefusal)) throw new Error(`a refused code did not say what to do next: ${codeRefusal}`)
   if (await page.getByLabel('Name for this screen').inputValue() !== 'Hallway') throw new Error('a refused code erased the screen name')
-  if (displays.length !== 1) throw new Error('a refused code registered a screen anyway')
+  if (displays.length !== 2) throw new Error('a refused code registered a screen anyway')
 
   await page.getByRole('button', { name: 'Type the new code' }).click()
   await page.getByLabel('Code from the screen').fill(GOOD_CODE)
@@ -185,7 +274,7 @@ try {
   if (await page.getByLabel('Name for this screen').inputValue() !== 'Hallway') throw new Error('re-reading the code lost the name already typed')
   await page.getByRole('button', { name: 'Add this screen' }).click()
   await page.getByText('Hallway has joined the household').waitFor()
-  if (displays.length !== 2 || displays[1].name !== 'Hallway') throw new Error('the second screen was not added')
+  if (displays.length !== 3 || displays[2].name !== 'Hallway') throw new Error('the second screen was not added')
   await page.getByRole('button', { name: 'Done' }).click()
   await page.getByRole('button', { name: 'Add a screen' }).waitFor()
 
@@ -233,7 +322,7 @@ try {
   if (await browserPage.getByLabel('Name for this screen').count() !== 0) throw new Error('a reload reopened the enrolment flow with a code that was already spent')
   if (enrolAttempts.length !== before) throw new Error('a reload replayed an enrolment code that had already been spent')
 
-  console.log('SCREEN ENROLMENT E2E PASS: all three household cases, manual fallback, expired-code recovery, the browser fragment path, nothing persisted')
+  console.log('SCREEN ENROLMENT E2E PASS: case 1 claims and sets up a household with no browser, cases 2 and 3, manual fallback, expired-code recovery, the browser fragment path, nothing persisted')
 } finally {
   await browser.close()
   await new Promise((resolve, reject) => server.close((error) => error ? reject(error) : resolve()))

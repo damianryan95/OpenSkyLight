@@ -7,7 +7,9 @@ import { PhoneCalendarsCard } from '../components/PhoneCalendarsCard'
 import { syncPhoneCalendars } from '../api/phoneCalendarSync'
 import { PERSON_THEME_PACKS, type BuiltInPersonThemeId } from '@shared/personalization'
 
-const COLORS = ['#DC6B49', '#3D8B7A', '#527BC4', '#A66AB0', '#C68A2C', '#57736B']
+/** Exported so first-run setup gives people the same colours this page does. */
+export const PERSON_COLOURS = ['#DC6B49', '#3D8B7A', '#527BC4', '#A66AB0', '#C68A2C', '#57736B'] as const
+const COLORS = PERSON_COLOURS
 
 export function PeopleCalendarsPage({ section }: { section: 'household' | 'calendar' }) {
   const [people, setPeople] = useState<PersonDto[]>([])

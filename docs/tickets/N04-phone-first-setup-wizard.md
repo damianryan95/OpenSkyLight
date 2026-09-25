@@ -1,6 +1,6 @@
 # N04 - Phone-first setup wizard
 
-Status: planned
+Status: in progress (wizard built and driven; the `N02`/`N03` discovery half remains)
 Depends on: N02, N03, P01, N18
 
 ## Amendment (2026-09-22): the wizard is entered by scanning a screen
@@ -45,3 +45,37 @@ Likely files: `src/companion/src/pages` (new wizard flow), phone E2E tests.
 
 Verify: phone-viewport E2E covering the full first-run path, plus a
 re-run-safety test confirming a configured household is not re-wizarded.
+
+## Built (2026-09-25)
+
+`src/companion/src/pages/HouseholdSetupFlow.tsx`, entered two ways that converge
+after the first step: scanning a brand-new screen (ADR 0006 case 1, which also
+adds that screen), or typing the box's address and finding it has no PIN. In
+both the parent never opens a browser.
+
+Four steps, each a thin front on a page that already exists so nothing is set up
+in a way that cannot be changed later: **claim** (choose and confirm the PIN,
+name the phone, name the scanned screen), **where you live** (timezone prefilled
+from the phone, optional town for weather — the shared `LocationPicker`, which
+the Home tab's location card now also uses), **who lives here** (at least one
+person), **your screen** (already in if scanned, else add one or defer).
+
+### What is proven
+
+- The full path on the built app bundle at a phone viewport
+  (`scripts/e2e-phone-screen-enrolment.mjs`), and again against the real server
+  on a fresh database: the PIN chosen on the phone is the household PIN, the
+  phone is paired under its name, the person and timezone exist, the scanned
+  screen is registered and collects its own credential.
+- Re-run safety as a property of state: a configured household is not offered
+  setup, from either entry, and a second claim is refused.
+- Mismatched PINs cannot be submitted; setup cannot continue with nobody in the
+  household.
+
+### What is not
+
+- The first acceptance line names a **factory Pi**: joining its access point
+  (`N02`) and finding it by name (`N03`) are hardware-gated and not built. Today
+  the address comes from the QR or is typed.
+- No real camera has scanned a real screen. Manual code entry drives the same
+  downstream code.

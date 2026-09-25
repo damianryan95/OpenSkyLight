@@ -1,18 +1,21 @@
 # N18 - Screen-displayed QR enrolment and household claim
 
-Status: in progress (cases 2 and 3 done and driven; case 1 blocked)
+Status: done (all three cases driven; no real camera has yet scanned a screen)
 Depends on: N17; ceremony settled by ADR 0006
 
-## Built 2026-09-24 — what works, and the one criterion that does not
+## Built 2026-09-24, completed 2026-09-25
 
 The ceremony exists and was driven across three real processes: a real server,
 a real kiosk in a browser, and the real companion bundle. An unregistered screen
 shows a QR and eight typeable characters, a parent redeems, and the screen
 collects its own credential and opens the board with no further interaction.
 
-**Cases 2 and 3 are done.** A paired phone adds a screen; an unpaired phone is
+**All three cases are done.** A paired phone adds a screen; an unpaired phone is
 handed the server address by the QR, asks only for the PIN, and pairs and enrols
-in one step.
+in one step; and the first phone to scan a brand-new screen claims the household
+and runs first-run setup (`N04`) — driven on the built app bundle against a fake
+server, and again against the real server on a fresh database, with the screen
+then collecting its own credential.
 
 **Case 1 was blocked until 2026-09-25**, by `POST /api/v1/auth/setup` calling
 `assertSameOrigin`, which an app at `capacitor://localhost` can never satisfy.
