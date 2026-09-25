@@ -1,7 +1,21 @@
 # K03 - Enforce the read-only display experience
 
-Status: done  
+Status: done, narrowed twice  
 Depends on: K01, A03, A04
+
+## Narrowed by N06 and N15 — what still holds
+
+This ticket is **not** superseded. Calendar events became writable from a
+display in `N15`, and only inside the PIN-bounded unlock window that already
+gated display layout editing. Everything else K03 covers — chores beyond
+today, lists, meals, rewards, household settings — is still refused, whether
+or not that window is open, by the `default` arm of the display RPC whitelist
+in `src/server/api/router.ts`.
+
+`tests/unit/displayAuth.test.ts` asserts the narrower boundary in both
+directions: the three event channels are refused while locked and accepted
+while unlocked, the window expires without leaving a writable surface behind,
+and every other mutation still answers 403.
 
 ## Context
 

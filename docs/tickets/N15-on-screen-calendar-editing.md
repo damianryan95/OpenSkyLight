@@ -1,7 +1,9 @@
 # N15 - On-screen calendar editing
 
-Status: planned
+Status: in progress (every local criterion driven on a real display; the
+outward-sync criterion needs a connected calendar)
 Depends on: N06
+Routing and conflict rules: [ADR 0007](../adr/0007-calendar-write-back.md)
 
 ## Context
 
@@ -114,3 +116,39 @@ Verify: browser journey for create/edit/delete on a display, PIN lock/expiry
 tests, per-source read-only rejection tests, recurrence single-occurrence
 tests, and a revised `K03` regression suite proving the remaining read-only
 guarantees still hold.
+
+
+## Built (2026-09-25)
+
+Driven against a real server and a real browser kiosk, not only unit tests.
+
+### What is proven
+
+- A parent unlocks a display with the household PIN and creates an event from
+  the wall; it appears on the board. Locked, the same channel answers 403, and
+  the "Add an event" affordance is not rendered at all.
+- The editing window expires on its own and leaves no writable surface behind.
+- An untagged event, and an event tagged with a person who has no writable
+  calendar, stay on the OpenSkyLight calendar and produce no error or warning.
+  Sync health still reports `not_configured` for a household with no calendar
+  connected — the seeded local calendar deliberately does not count as one.
+- A household with no calendar at all creates, edits and deletes events, and
+  they survive a full server restart on the same volume.
+- Editing one occurrence of a weekly series leaves the other four intact and
+  the master untouched.
+- `K03`'s remaining guarantees, asserted in both lock states.
+
+### What is not
+
+- The first acceptance line — an event tagged with a person who has a linked
+  writable calendar appearing in **that person's own calendar app** — needs a
+  connected calendar and has not been driven. The path beneath it is built and
+  tested (`N06`), but a green test is not a calendar app with the event in it.
+
+### Decided here
+
+The board's own calendar is seeded in migration 013 with a fixed id, is not
+listed among connected sources, and refuses removal. An event authored here
+always gets a local row and carries a UID we mint; tagging additionally queues
+an outward write carrying that same UID, so the copy that syncs back collapses
+into one on the wall. ADR 0007 has the reasoning.

@@ -6,7 +6,8 @@ import type {
   CalendarUpdateInput,
   PersonCreateInput,
   PersonUpdateInput,
-  AppSettings
+  AppSettings,
+  EventDraftInput
 } from '@shared/types'
 import type { DateRange } from '@shared/dates'
 import { useToasts } from '../stores/toastStore'
@@ -246,6 +247,33 @@ export function useCitySearch() {
   return useMutation({
     mutationFn: (query: string) => ipcInvoke('weather:searchCity', { query })
   })
+}
+
+/**
+ * Authoring events from the display (`N15`).
+ *
+ * Every one of these is refused unless the parent PIN unlock is live, so the
+ * caller must gate the UI on `useAuthStatus().unlocked` rather than discover the
+ * refusal after somebody has typed an event out.
+ *
+ * `occurrences` is invalidated rather than patched: the routing rule may have
+ * sent the event outward, and what the board should show afterwards is the
+ * server's answer, not a guess made here.
+ */
+export function useEventMutations() {
+  const keys = [['occurrences'], ['event'], ['syncStatus']]
+  return {
+    create: useInvalidatingMutation((input: EventDraftInput) => ipcInvoke('events:create', input), keys),
+    update: useInvalidatingMutation(
+      (input: { id: string; patch: Partial<EventDraftInput>; scope?: 'series' | 'occurrence'; occurrenceStart?: string }) =>
+        ipcInvoke('events:update', input),
+      keys
+    ),
+    remove: useInvalidatingMutation(
+      (input: { id: string; scope?: 'series' | 'occurrence'; occurrenceStart?: string }) => ipcInvoke('events:delete', input),
+      keys
+    )
+  }
 }
 
 export function useAuthStatus() {

@@ -8,6 +8,8 @@ import type {
   ChoreUpdateInput,
   DayChoreDto,
   EventDto,
+  EventDraftInput,
+  AuthoredEvent,
   ListDto,
   ListItemDto,
   ListKind,
@@ -46,6 +48,17 @@ export type IpcContract = {
 
   'events:getOccurrences': { req: { start: string; end: string }; res: OccurrenceDto[] }
   'events:get': { req: { id: string }; res: EventDto | null }
+  /**
+   * Authoring from a display (`N15`). The only writes a wall display may make
+   * besides ticking today's chores, and only while the household PIN unlock is
+   * live — the server refuses them outright otherwise.
+   *
+   * `scope` is what protects a series: 'occurrence' records an override for one
+   * date and leaves the repeating event alone.
+   */
+  'events:create': { req: EventDraftInput; res: AuthoredEvent }
+  'events:update': { req: { id: string; patch: Partial<EventDraftInput>; scope?: 'series' | 'occurrence'; occurrenceStart?: string }; res: AuthoredEvent }
+  'events:delete': { req: { id: string; scope?: 'series' | 'occurrence'; occurrenceStart?: string }; res: void }
 
   'ics:add': { req: { url: string; name: string; color: string }; res: CalendarDto }
 

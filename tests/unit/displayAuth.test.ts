@@ -3,11 +3,13 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { Readable } from 'node:stream'
 import type { IncomingMessage, ServerResponse } from 'node:http'
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { DisplayDeviceService, HouseholdAuthService, ParentDeviceService } from '../../src/server/auth'
 import { handleApiRequest, type ApiRouterDependencies } from '../../src/server/api/router'
 import { openServerDatabase, type ServerDatabase } from '../../src/server/db'
 import { createChoresRewardsService, createDisplayReadService, createHouseholdSettingsService, createListsDomain, createMealsDomain, createPeopleService } from '../../src/server/domain'
+import { createEventAuthoringService } from '../../src/server/domain/events'
+import { createEventWriteService } from '../../src/server/domain/eventWrites'
 
 const temporaryDirectories: string[] = []
 
@@ -107,6 +109,10 @@ describe('display registration and capabilities', () => {
     }
     const credential = displays.register({ name: 'Kitchen' }).credential
     const headers = { authorization: `Bearer ${credential}`, 'content-type': 'application/json' }
+    // K03's remaining guarantees, narrowed twice now (by N06 and N15) and still
+    // absolute for everything listed here. These stay refused whether or not the
+    // parent PIN unlock is live — only calendar events and today's chores were
+    // ever carved out, and the carve-out is asserted separately below.
     const forbiddenMutations = [
       'app:installUpdate',
       'people:create', 'people:update', 'people:delete',
@@ -137,6 +143,98 @@ describe('display registration and capabilities', () => {
 
     expect((await call('POST', '/api/rpc/auth%3Alock', headers, {}, dependencies)).status).toBe(200)
     expect((await call('POST', '/api/rpc/settings%3Aset', headers, { patch: { homeLayout: [] } }, dependencies)).status).toBe(403)
+    db.close()
+  })
+
+  /**
+   * The narrowing `N15` makes, stated as its own test so the boundary is visible
+   * rather than implied: calendar events become writable from a wall display, and
+   * only inside the PIN window, and nothing else moves.
+   */
+  it('lets a PIN-unlocked display write calendar events, and refuses them again once it locks', async () => {
+    const db = database()
+    const auth = new HouseholdAuthService(db.sqlite)
+    const displays = new DisplayDeviceService(db.sqlite)
+    const settings = createHouseholdSettingsService(db.sqlite)
+    const chores = createChoresRewardsService(db.sqlite)
+    const writes = createEventWriteService(db.sqlite)
+    const dependencies = {
+      auth, displays, parentDevices: new ParentDeviceService(db.sqlite), settings, chores,
+      people: createPeopleService(db.sqlite), lists: createListsDomain(db.sqlite), meals: createMealsDomain(db.sqlite),
+      displayRead: createDisplayReadService(db.sqlite, chores),
+      eventAuthoring: createEventAuthoringService(db.sqlite, writes)
+    }
+    const credential = displays.register({ name: 'Kitchen' }).credential
+    const headers = { authorization: `Bearer ${credential}`, 'content-type': 'application/json' }
+    auth.setup('1234')
+    const draft = {
+      title: 'Dentist', description: null, location: null,
+      startAt: '2026-06-15T09:00:00.000Z', endAt: '2026-06-15T10:00:00.000Z',
+      timezone: 'Europe/London', allDay: false, recurrence: null, personId: null
+    }
+
+    // Locked: refused exactly as it was before the channel existed.
+    for (const channel of ['events:create', 'events:update', 'events:delete']) {
+      const locked = await call('POST', `/api/rpc/${encodeURIComponent(channel)}`, headers, { ...draft, id: 'whatever' }, dependencies)
+      expect(locked.status, channel).toBe(403)
+    }
+
+    expect((await call('POST', '/api/rpc/auth%3AverifyPin', headers, { pin: '1234' }, dependencies)).status).toBe(200)
+
+    const created = await call('POST', '/api/rpc/events%3Acreate', headers, draft, dependencies)
+    expect(created.status).toBe(200)
+    const eventId = (JSON.parse(created.body) as { data: { id: string } }).data.id
+    expect((await call('POST', '/api/rpc/events%3Aupdate', headers, { id: eventId, patch: { title: 'Dentist (moved)' } }, dependencies)).status).toBe(200)
+    expect((await call('POST', '/api/rpc/events%3Adelete', headers, { id: eventId }, dependencies)).status).toBe(200)
+
+    // A reading channel the editor needs, and it is a read, so it never needed a gate.
+    expect((await call('POST', '/api/rpc/events%3Aget', headers, { id: eventId }, dependencies)).status).toBe(200)
+
+    // Locking again leaves no writable surface behind.
+    expect((await call('POST', '/api/rpc/auth%3Alock', headers, {}, dependencies)).status).toBe(200)
+    for (const channel of ['events:create', 'events:update', 'events:delete']) {
+      const relocked = await call('POST', `/api/rpc/${encodeURIComponent(channel)}`, headers, { ...draft, id: eventId }, dependencies)
+      expect(relocked.status, channel).toBe(403)
+    }
+    db.close()
+  })
+
+  it('expires the editing window without being locked, and refuses writes again', async () => {
+    const db = database()
+    const auth = new HouseholdAuthService(db.sqlite)
+    const displays = new DisplayDeviceService(db.sqlite)
+    const settings = createHouseholdSettingsService(db.sqlite)
+    const chores = createChoresRewardsService(db.sqlite)
+    const dependencies = {
+      auth, displays, parentDevices: new ParentDeviceService(db.sqlite), settings, chores,
+      people: createPeopleService(db.sqlite), lists: createListsDomain(db.sqlite), meals: createMealsDomain(db.sqlite),
+      displayRead: createDisplayReadService(db.sqlite, chores),
+      eventAuthoring: createEventAuthoringService(db.sqlite, createEventWriteService(db.sqlite))
+    }
+    const credential = displays.register({ name: 'Kitchen' }).credential
+    const headers = { authorization: `Bearer ${credential}`, 'content-type': 'application/json' }
+    auth.setup('1234')
+    await call('POST', '/api/rpc/auth%3AverifyPin', headers, { pin: '1234' }, dependencies)
+    expect(JSON.parse((await call('POST', '/api/rpc/auth%3AgetStatus', headers, {}, dependencies)).body))
+      .toEqual({ ok: true, data: { pinSet: true, unlocked: true } })
+
+    // The window is a wall-clock deadline, so moving past it is what expiry is.
+    const eleven = new Date(Date.now() + 11 * 60_000)
+    vi.useFakeTimers()
+    vi.setSystemTime(eleven)
+    try {
+      expect(JSON.parse((await call('POST', '/api/rpc/auth%3AgetStatus', headers, {}, dependencies)).body))
+        .toEqual({ ok: true, data: { pinSet: true, unlocked: false } })
+      const draft = {
+        title: 'Dentist', description: null, location: null,
+        startAt: '2026-06-15T09:00:00.000Z', endAt: '2026-06-15T10:00:00.000Z',
+        timezone: 'Europe/London', allDay: false, recurrence: null, personId: null
+      }
+      expect((await call('POST', '/api/rpc/events%3Acreate', headers, draft, dependencies)).status).toBe(403)
+      expect((await call('POST', '/api/rpc/settings%3Aset', headers, { patch: { homeLayout: [] } }, dependencies)).status).toBe(403)
+    } finally {
+      vi.useRealTimers()
+    }
     db.close()
   })
 })

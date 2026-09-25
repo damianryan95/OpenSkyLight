@@ -5,6 +5,7 @@ import { occurrenceColor } from '../../lib/colors'
 import { isToday } from '../../lib/format'
 import { EventCard } from './EventCard'
 import { useCalendarData, useViewRange } from './useCalendarData'
+import { useCalendarEditing } from './useEventEditor'
 
 export function AgendaView() {
   const range = useViewRange()
@@ -12,6 +13,7 @@ export function AgendaView() {
   const { data: settings } = useSettings()
   const timeFormat = settings?.timeFormat ?? '12h'
   const days = eachDay(range, ZONE)
+  const { unlocked, editOccurrence, createOn } = useCalendarEditing()
 
   return (
     <div className="mx-auto h-full w-full max-w-3xl overflow-y-auto px-6 pb-28">
@@ -27,6 +29,7 @@ export function AgendaView() {
                 className={`pressable flex h-20 w-20 shrink-0 flex-col items-center justify-center rounded-2xl ${
                   today ? 'bg-ember text-white shadow-card' : 'bg-paper-deep/60 text-ink'
                 }`}
+                {...(unlocked ? { onClick: () => createOn(key), role: 'button', tabIndex: 0 } : {})}
               >
                 <span className={`text-xs font-extrabold uppercase ${today ? 'text-white/80' : 'text-ink-faint'}`}>
                   {day.toFormat('ccc')}
@@ -45,6 +48,7 @@ export function AgendaView() {
                     timeFormat={timeFormat}
                     peopleById={peopleById}
                     size="lg"
+                    onSelect={editOccurrence}
                   />
                 ))}
               </div>

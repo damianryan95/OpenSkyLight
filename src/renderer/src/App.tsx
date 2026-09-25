@@ -13,6 +13,7 @@ import { WeekView } from './features/calendar/WeekView'
 import { DayView } from './features/calendar/DayView'
 import { MonthView } from './features/calendar/MonthView'
 import { AgendaView } from './features/calendar/AgendaView'
+import { EventEditorHost } from './features/calendar/EventEditorHost'
 import { ChoresView } from './features/chores/ChoresView'
 import { ListsView } from './features/lists/ListsView'
 import { SettingsSheet } from './features/settings/SettingsSheet'
@@ -98,6 +99,7 @@ export default function App() {
         {view === 'lists' && <ListsView />}
       </main>
       <SettingsSheet />
+      <EventEditorHost />
       <OskTray />
       <Toasts />
       <UpdateBanner />

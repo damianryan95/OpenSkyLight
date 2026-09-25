@@ -7,6 +7,7 @@ import { occurrenceColor } from '../../lib/colors'
 import { isToday } from '../../lib/format'
 import { EventCard } from './EventCard'
 import { useCalendarData, useViewRange } from './useCalendarData'
+import { useCalendarEditing } from './useEventEditor'
 import { MealsDialog, MealStrip, useMealsForRange } from '../meals/Meals'
 
 export function WeekView() {
@@ -17,6 +18,7 @@ export function WeekView() {
   const days = eachDay(range, ZONE)
   const mealsByDay = useMealsForRange(range)
   const [mealDate, setMealDate] = useState<string | null>(null)
+  const { unlocked, editOccurrence, createOn } = useCalendarEditing()
 
   return (
     <div className="grid h-full grid-cols-7 gap-3 px-6 pb-6">
@@ -32,7 +34,10 @@ export function WeekView() {
             }`}
             style={{ animationDelay: `${i * 45}ms` }}
           >
-            <div className="mb-2 flex items-baseline gap-2 rounded-xl px-2 py-1">
+            <div
+              className={`mb-2 flex items-baseline gap-2 rounded-xl px-2 py-1 ${unlocked ? 'pressable' : ''}`}
+              {...(unlocked ? { onClick: () => createOn(key), role: 'button', tabIndex: 0 } : {})}
+            >
               <span className={`text-sm font-extrabold uppercase ${today ? 'text-ember-deep' : 'text-ink-faint'}`}>{day.toFormat('ccc')}</span>
               <span className={`font-display text-3xl ${today ? 'flex h-11 w-11 items-center justify-center rounded-full bg-ember leading-none text-white' : 'text-ink'}`}>{day.day}</span>
             </div>
@@ -46,6 +51,7 @@ export function WeekView() {
                   color={occurrenceColor(occ, peopleById, calendarsById)}
                   timeFormat={timeFormat}
                   peopleById={peopleById}
+                  onSelect={editOccurrence}
                 />
               ))}
               {occurrences.length === 0 && (

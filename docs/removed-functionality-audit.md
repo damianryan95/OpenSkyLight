@@ -19,7 +19,7 @@ from there. Most of what is missing went during that re-platforming.
 | **Bird detections (BirdNET-Go)** | `C02` | Tile pointed at a BirdNET-Go instance. No trace remains. |
 | **Two-way Google Calendar sync** | `C03` | Kiosk could create/edit/delete events. Deliberately reduced to read-only. |
 | **Google Calendar integration entirely** | `N13` | Replaced by provider-agnostic CalDAV/ICS (`N14`) per ADR 0002 — a deliberate widening, not a loss. |
-| **Local calendars with on-screen event create/edit/delete** | `C03`, `K03` | The kiosk is now strictly read-only apart from ticking today's chores. **Selected to return** as [`N15`](tickets/N15-on-screen-calendar-editing.md), once `N06` provides a write path. |
+| **Local calendars with on-screen event create/edit/delete** | `C03`, `K03` | **Restored** by [`N15`](tickets/N15-on-screen-calendar-editing.md) (2026-09-25), behind the household PIN, with the board's own calendar back as a real source kind. The outward half is [`N06`](tickets/N06-bidirectional-calendar-sync-adr.md). |
 
 ## 2. Lost when Electron was retired (`C04`)
 
@@ -92,10 +92,11 @@ decisions. A parent could add a News tile and get one that never loaded, which
 is worse than the feature being absent, because the product was advertising
 something it could not do. Those were fixed rather than hidden.
 
-One item from section 1 has since been selected to return:
-**on-screen calendar editing**, as [`N15`](tickets/N15-on-screen-calendar-editing.md),
-scheduled behind `N06` because writing an event from a wall display only means
-something once the change reaches the calendar it came from.
+One item from section 1 has since returned: **on-screen calendar editing**, as
+[`N15`](tickets/N15-on-screen-calendar-editing.md), built on the write path from
+`N06`. It came back larger than it left — the board is now a calendar in its own
+right, so a household that connects nothing at all still gets a working shared
+family calendar, which upstream's local calendars only half provided.
 
 The rest of section 1 and 2 stands as the record of what could return later.
 Each would be its own ticket.

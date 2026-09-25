@@ -21,22 +21,31 @@ export function PersonDots({ personIds, peopleById }: { personIds: string[]; peo
   )
 }
 
+/**
+ * `onSelect` is what makes a card editable (`N15`). It is omitted while the
+ * display is locked, so a card stays a card: a child tapping the wall gets
+ * nothing, rather than an editor that refuses to save.
+ */
 export function EventCard({
   occ,
   color,
   timeFormat,
   peopleById,
-  size = 'md'
+  size = 'md',
+  onSelect
 }: {
   occ: OccurrenceDto
   color: string
   timeFormat: '12h' | '24h'
   peopleById: Map<string, PersonDto>
   size?: 'md' | 'lg'
+  onSelect?: (occ: OccurrenceDto) => void
 }) {
+  const tap = onSelect === undefined ? {} : { onClick: () => onSelect(occ), role: 'button', tabIndex: 0 }
   if (occ.allDay) {
     return (
       <div
+        {...tap}
         className={`pressable flex w-full items-center gap-2 rounded-xl px-3 text-left font-bold shadow-card ${
           size === 'lg' ? 'min-h-14 text-lg' : 'min-h-11 text-[15px]'
         }`}
@@ -49,6 +58,7 @@ export function EventCard({
   }
   return (
     <div
+      {...tap}
       className={`pressable w-full rounded-xl bg-card text-left shadow-card ${
         size === 'lg' ? 'p-4' : 'px-3 py-2'
       }`}
