@@ -1,5 +1,11 @@
 # Local home deployment
 
+> **Not the path in use.** `home-server` runs a Portainer **Repository stack**
+> that clones this repository and builds it itself — see `compose.yaml` and
+> "Current deployment status" in [`delivery-plan.md`](../delivery-plan.md).
+> Work must be pushed to reach it. What follows is the alternative SSH-context
+> path, which builds the local working tree instead.
+
 This deployment path is intentionally local. It does not push to the upstream
 `lowerygt/OpenSkyLight` repository, use GitHub Actions, or require a container
 registry. The current working tree is checked, built, and sent to the Docker VM

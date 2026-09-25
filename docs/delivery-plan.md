@@ -11,19 +11,32 @@ worked*.
 
 ## Current deployment status
 
-The Portainer stack on `home-server` is a **basic deployment smoke test only**.
-Nothing is connected to it, it holds no real household data, and no calendar
-source is configured. It is not a production instance and nothing in this plan
-needs to protect it.
+The Portainer stack on `home-server` is **the working deployment** — where this
+product is built, deployed and tested. It is not a smoke test, and it was
+described as one here until 2026-09-25, which is worth knowing because the
+consequences below were justified by that description rather than by a decision.
+
+It is deployed through Portainer's **Repository stack** method: Portainer clones
+this repository at a configured reference and builds the image itself from
+`compose.yaml` and the root `Dockerfile`. **Nothing in a local working tree
+reaches it.** Work must be pushed, and the stack's repository reference must
+point at a branch that contains it.
 
 Consequences, which this plan assumes throughout:
 
-- **There is no data to migrate or preserve.** Schema changes amend the
-  existing migrations in place; existing volumes are discarded and rebuilt.
-- **No backups are required before schema work.**
-- **Greenfield posture.** Removing a capability before its replacement lands
-  carries no user impact — sequencing is driven by keeping each phase coherent,
-  not by protecting live state.
+- **Its data is treated as disposable, by choice rather than by absence.**
+  Schema changes may amend existing migrations in place, and the volume is then
+  deleted and rebuilt. That is a real cost each time — the household PIN,
+  enrolled displays, paired phones, people, chores and any connected calendar
+  source all go with it, and have to be set up again before testing resumes.
+  Choose it deliberately; a forward migration is the alternative.
+- **Back up before schema work when the household state is worth keeping.**
+  `operations-cli.js backup` takes an online SQLite backup from inside the
+  container.
+- **Greenfield posture for sequencing.** Removing a capability before its
+  replacement lands carries no *user* impact, because the household on this
+  stack is the development team's own. Sequencing is still driven by keeping
+  each phase coherent.
 
 ## Ground rules
 

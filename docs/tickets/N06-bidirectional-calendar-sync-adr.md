@@ -109,8 +109,17 @@ Until both are driven, this ticket is `in progress`.
 ### Rebuild the volume
 
 Migration 001 was amended in place to add the `local` source kind, because
-SQLite cannot `ALTER` a `CHECK` constraint. Per the delivery plan's greenfield
-posture, **existing databases must be deleted and rebuilt** — a development
-`data/openskylight.db` and the Portainer stack's volume alike. A database left
-at the old schema will not carry the constraint and will reject the seeded
-calendar.
+SQLite cannot `ALTER` a `CHECK` constraint. **Existing databases must therefore
+be deleted and rebuilt** — a development `data/openskylight.db` and the
+`openskylight-data` volume on `home-server` alike. A database left at the old
+schema does not carry the constraint and rejects the seeded calendar.
+
+This was chosen deliberately over a forward migration (owner's direction,
+2026-09-25), and it is not free: the household PIN, enrolled displays, paired
+phones, people, chores and any connected calendar source go with the volume and
+must be set up again. On `home-server` that includes **the paired phone the
+remaining N06 verification needs**, so re-pair it before attempting the Android
+write-back run.
+
+Rebuilding a table to change its `CHECK` constraint is the alternative if this
+trade stops being worth making.
