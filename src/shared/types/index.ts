@@ -94,6 +94,38 @@ export interface EventDto {
   personIds: string[]
 }
 
+/**
+ * An event as a person types it, on a phone or on a wall display (ADR 0007).
+ *
+ * `personId` is the routing rule's only input: tag somebody who has a writable
+ * calendar and the event is written there too; leave it null, or tag somebody
+ * without one, and it lives on the board alone. Staying local is the ordinary
+ * outcome and is never an error.
+ */
+export interface EventDraftInput {
+  title: string
+  description: string | null
+  location: string | null
+  /** UTC ISO instant */
+  startAt: string
+  endAt: string
+  /** IANA zone the recurrence pattern lives in */
+  timezone: string
+  allDay: boolean
+  /** RRULE body without the property name, or null for a one-off */
+  recurrence: string | null
+  personId: string | null
+}
+
+/** What authoring an event returns. `destinationCalendarId` is null whenever the
+ * event stays on the board, which is most of the time. */
+export interface AuthoredEvent {
+  id: string
+  calendarId: string
+  destinationCalendarId: string | null
+  icalUid: string
+}
+
 export interface OccurrenceDto {
   /** Unique per occurrence: `${eventId}|${occurrenceStart}` */
   key: string

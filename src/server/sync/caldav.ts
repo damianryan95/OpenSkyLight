@@ -7,6 +7,19 @@ export class CalDavError extends Error {
   }
 }
 
+/**
+ * The server refused a write because the resource is not in the state we
+ * believed — someone else edited or deleted it since we last read it. Distinct
+ * from a transport failure because the queue must not simply retry it: the
+ * conflict rule decides what happens next.
+ */
+export class CalDavConflictError extends CalDavError {
+  constructor(message: string) {
+    super(message)
+    this.name = 'CalDavConflictError'
+  }
+}
+
 export interface CalDavCredentials {
   baseUrl: string
   username: string
@@ -166,6 +179,100 @@ export function createCalDavClient(credentials: CalDavCredentials, fetcher: Fetc
     return collections
   }
 
+  /**
+   * Reads one event resource. Used by the write path when a precondition fails:
+   * resolving that conflict means knowing what the other version actually says,
+   * and re-running a whole collection REPORT to find one event would be absurd.
+   *
+   * Returns null when the resource is gone, which is a legitimate answer — the
+   * other writer may have deleted it.
+   */
+  async function getEvent(resourceUrl: string): Promise<CalDavResource | null> {
+    const url = assertSafeUrl(resourceUrl).toString()
+    let response: Response
+    try {
+      response = await fetcher(url, { method: 'GET', headers: { authorization, accept: 'text/calendar' } })
+    } catch {
+      throw new CalDavError('The calendar server could not be reached.')
+    }
+    if (response.status === 404 || response.status === 410) return null
+    if (response.status === 401 || response.status === 403) {
+      throw new CalDavError('The calendar server rejected the username or app password.')
+    }
+    if (response.status < 200 || response.status >= 300) {
+      throw new CalDavError(`The calendar server returned an error (${response.status}).`)
+    }
+    return { href: url, etag: response.headers.get('etag'), data: await response.text() }
+  }
+
+  /**
+   * Writes one event resource. `expectedEtag` drives the precondition, and the
+   * choice of precondition is the whole idempotency story:
+   *
+   * - an etag means "replace exactly the version I read" (`If-Match`), so a
+   *   concurrent edit is refused rather than overwritten unseen;
+   * - null means "create, and only if nothing is there" (`If-None-Match: *`),
+   *   so a replayed create after a crash cannot produce a second event.
+   *
+   * A replayed create is reported as success, not conflict: the resource
+   * existing is exactly the outcome the caller wanted.
+   */
+  async function putEvent(resourceUrl: string, icsBody: string, expectedEtag: string | null): Promise<{ etag: string | null; alreadyExisted: boolean }> {
+    const url = assertSafeUrl(resourceUrl).toString()
+    const headers: Record<string, string> = {
+      authorization,
+      'content-type': 'text/calendar; charset=utf-8'
+    }
+    if (expectedEtag === null) headers['if-none-match'] = '*'
+    else headers['if-match'] = expectedEtag
+
+    let response: Response
+    try {
+      response = await fetcher(url, { method: 'PUT', headers, body: icsBody })
+    } catch {
+      throw new CalDavError('The calendar server could not be reached.')
+    }
+    if (response.status === 401 || response.status === 403) {
+      throw new CalDavError('The calendar server would not accept a change to this calendar.')
+    }
+    if (response.status === 412 || response.status === 409) {
+      if (expectedEtag === null) return { etag: response.headers.get('etag'), alreadyExisted: true }
+      throw new CalDavConflictError('This event changed in the calendar since the board last read it.')
+    }
+    if (response.status < 200 || response.status >= 300) {
+      // As with reads, the remote body may echo credentials and never reaches
+      // the message, the logs, or the parent UI.
+      throw new CalDavError(`The calendar server returned an error (${response.status}).`)
+    }
+    // A server may answer with no etag and expect a re-read to discover it.
+    return { etag: response.headers.get('etag'), alreadyExisted: false }
+  }
+
+  /** Removes one event resource. A resource already gone counts as removed:
+   * the caller asked for its absence, which is the state that now holds. */
+  async function deleteEvent(resourceUrl: string, expectedEtag: string | null): Promise<void> {
+    const url = assertSafeUrl(resourceUrl).toString()
+    const headers: Record<string, string> = { authorization }
+    if (expectedEtag !== null) headers['if-match'] = expectedEtag
+
+    let response: Response
+    try {
+      response = await fetcher(url, { method: 'DELETE', headers })
+    } catch {
+      throw new CalDavError('The calendar server could not be reached.')
+    }
+    if (response.status === 404 || response.status === 410) return
+    if (response.status === 401 || response.status === 403) {
+      throw new CalDavError('The calendar server would not accept a change to this calendar.')
+    }
+    if (response.status === 412) {
+      throw new CalDavConflictError('This event changed in the calendar since the board last read it.')
+    }
+    if (response.status < 200 || response.status >= 300) {
+      throw new CalDavError(`The calendar server returned an error (${response.status}).`)
+    }
+  }
+
   /** Events overlapping the window, as raw iCalendar documents. */
   async function listEvents(collectionUrl: string, window: { start: Date; end: Date }): Promise<CalDavResource[]> {
     const stamp = (value: Date): string => value.toISOString().replace(/[-:]/g, '').replace(/\.\d{3}/, '')
@@ -182,7 +289,7 @@ export function createCalDavClient(credentials: CalDavCredentials, fetcher: Fetc
     return resources
   }
 
-  return { discover, listEvents }
+  return { discover, listEvents, getEvent, putEvent, deleteEvent }
 }
 
 export type CalDavClient = ReturnType<typeof createCalDavClient>

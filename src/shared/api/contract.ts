@@ -116,8 +116,10 @@ export const createPersonRequestSchema = personSchema.pick({ name: true, color: 
 export const updatePersonRequestSchema = createPersonRequestSchema.partial().extend({ sortOrder: z.number().int().nonnegative().optional(), avatarData: z.string().max(1_500_000).nullable().optional() })
   .refine((value) => Object.keys(value).length > 0, { message: 'At least one person field is required' })
 
-/** A connected calendar provider: a CalDAV account, ICS feed, or phone. */
-export const calendarSourceKindSchema = z.enum(['caldav', 'ics', 'phone'])
+/** A connected calendar provider: a CalDAV account, ICS feed, or phone — plus
+ * `local`, the board's own calendar, which is seeded rather than connected and
+ * cannot be removed (ADR 0007). */
+export const calendarSourceKindSchema = z.enum(['caldav', 'ics', 'phone', 'local'])
 export const calendarSourceSchema = z.object({
   id: z.string().min(1),
   kind: calendarSourceKindSchema,
@@ -219,6 +221,104 @@ export const pushPhoneCalendarsConflictSchema = z.object({
     lastPushedAt: z.string().datetime({ offset: true })
   }))
 })
+/**
+ * Authoring an event on the board (ADR 0007). One shape serves the parent's
+ * phone and the wall display, because an event is the same thing wherever it is
+ * typed — only the authorisation in front of it differs.
+ *
+ * `personId` is the routing rule's only input: tag somebody with a writable
+ * calendar and the event travels there; leave it null, or tag somebody without
+ * one, and it stays on the board. Both are correct outcomes.
+ */
+const eventTimestampSchema = z.string().datetime({ offset: true })
+export const eventDraftSchema = z.object({
+  title: z.string().trim().min(1).max(1000),
+  description: z.string().max(20_000).nullable(),
+  location: z.string().max(1000).nullable(),
+  startAt: eventTimestampSchema,
+  endAt: eventTimestampSchema,
+  timezone: z.string().min(1).max(100),
+  allDay: z.boolean(),
+  /** RRULE body without the property name, e.g. `FREQ=WEEKLY;BYDAY=MO`. */
+  recurrence: z.string().max(2000).nullable(),
+  personId: z.string().min(1).nullable()
+}).strict().refine(({ startAt, endAt }) => Date.parse(startAt) <= Date.parse(endAt), {
+  message: 'An event cannot end before it starts'
+})
+
+export const updateEventRequestSchema = eventDraftSchema.innerType().partial()
+  .refine((value) => Object.keys(value).length > 0, { message: 'At least one event field is required' })
+
+/** Which of a series an edit means. The distinction is the whole of `N15`'s
+ * recurrence requirement: `series` rewrites the master, `occurrence` leaves it
+ * alone and records an override for that one date. */
+export const eventScopeSchema = z.enum(['series', 'occurrence'])
+
+export const authoredEventSchema = z.object({
+  id: z.string().min(1),
+  calendarId: z.string().min(1),
+  /** Where the outward copy is headed, or null when the event stays on the
+   * board. Null is the ordinary answer and never an error. */
+  destinationCalendarId: z.string().nullable(),
+  icalUid: z.string()
+})
+
+/**
+ * Write-back to a phone, which runs the opposite way to every other source
+ * (ADR 0007). The server cannot reach a phone's calendar store, so the phone
+ * **drains a queue**: it asks what changes are outstanding, applies them through
+ * the OS calendar API, and reports what happened.
+ *
+ * `sourceEventId` is what the phone previously told us the event is called, so an
+ * update or a delete can address the right row without a search. It is null for
+ * an event the phone has never seen, which is exactly a create.
+ */
+export const pendingEventWriteSchema = z.object({
+  id: z.string().min(1),
+  sourceCalendarId: z.string().min(1),
+  operation: z.enum(['create', 'update', 'delete']),
+  icalUid: z.string().min(1),
+  sourceEventId: z.string().nullable(),
+  event: z.object({
+    title: z.string(),
+    description: z.string().nullable(),
+    location: z.string().nullable(),
+    startAt: z.string().datetime({ offset: true }),
+    endAt: z.string().datetime({ offset: true }),
+    timezone: z.string().min(1),
+    allDay: z.boolean(),
+    /** RRULE body without the property name. Android's provider accepts this
+     * form directly; an occurrence override carries none. */
+    recurrence: z.string().nullable(),
+    recurrenceExdates: z.array(z.string().datetime({ offset: true })).nullable(),
+    originalStartAt: z.string().datetime({ offset: true }).nullable()
+  })
+})
+
+export const pendingEventWritesResponseSchema = z.object({
+  writes: z.array(pendingEventWriteSchema).max(200)
+})
+
+/**
+ * What the phone managed to do. `applied` carries the id the OS assigned, which
+ * is what the board records so the copy pushed back on the next sync is
+ * recognised as the same event rather than shown a second time.
+ */
+export const ackEventWritesRequestSchema = z.object({
+  results: z.array(z.object({
+    id: z.string().min(1),
+    status: z.enum(['applied', 'failed']),
+    sourceEventId: z.string().max(512).nullish(),
+    /** Written by the phone for a parent to read, so it is bounded and plain. */
+    message: z.string().max(500).nullish()
+  }).strict()).min(1).max(200)
+}).strict()
+
+export const ackEventWritesResponseSchema = z.object({
+  applied: z.number().int().nonnegative(),
+  failed: z.number().int().nonnegative()
+})
+
 export const householdSettingsSchema = z.object({ timezone: z.string().min(1), weather: z.object({ lat: z.number().min(-90).max(90), lon: z.number().min(-180).max(180), label: z.string().min(1).max(120) }).nullable() })
 export const updateHouseholdSettingsRequestSchema = householdSettingsSchema.pick({ timezone: true, weather: true }).partial()
   .refine((value) => Object.keys(value).length > 0, { message: 'At least one household setting is required' })
@@ -293,7 +393,21 @@ export const syncStatusEventSchema = z.object({
     lastAttemptAt: z.string().datetime().nullable(),
     lastSucceededAt: z.string().datetime().nullable(),
     error: z.string().nullable()
-  })).optional()
+  })).optional(),
+  /**
+   * The outward direction (ADR 0007). Separate from calendar freshness because
+   * the two fail independently: a board whose events are perfectly up to date can
+   * still be unable to write one back, and a parent needs to be told which.
+   *
+   * `conflicts` is the count of edits last-writer-wins discarded and kept. It is
+   * the reason that rule is permitted at all, so it is reported rather than
+   * buried.
+   */
+  writeBack: z.object({
+    pending: z.number().int().nonnegative(),
+    failed: z.number().int().nonnegative(),
+    conflicts: z.number().int().nonnegative()
+  }).optional()
 })
 
 export const choreChangedEventSchema = z.object({
@@ -383,5 +497,12 @@ export type DiscoveredCalendarDto = z.infer<typeof discoveredCalendarSchema>
 export type PhoneEventDto = z.infer<typeof phoneEventSchema>
 export type PushPhoneCalendarsRequest = z.infer<typeof pushPhoneCalendarsRequestSchema>
 export type PushPhoneCalendarsResponse = z.infer<typeof pushPhoneCalendarsResponseSchema>
+export type EventDraftDto = z.infer<typeof eventDraftSchema>
+export type UpdateEventRequest = z.infer<typeof updateEventRequestSchema>
+export type AuthoredEventDto = z.infer<typeof authoredEventSchema>
+export type EventScope = z.infer<typeof eventScopeSchema>
+export type PendingEventWriteDto = z.infer<typeof pendingEventWriteSchema>
+export type PendingEventWritesResponse = z.infer<typeof pendingEventWritesResponseSchema>
+export type AckEventWritesRequest = z.infer<typeof ackEventWritesRequestSchema>
 export type ListAdminDto = z.infer<typeof listSchema>
 export type MealSlotAdminDto = z.infer<typeof mealSlotSchema>

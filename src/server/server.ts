@@ -11,6 +11,9 @@ import { EventStream, type EventStreamAuthenticator } from './events'
 import { createRssService } from './domain/rss'
 import { createCalendarSyncStatusService } from './sync/status'
 import { createCalendarSourceService } from './sync/sources'
+import { createEventWriteService } from './domain/eventWrites'
+import { createEventAuthoringService } from './domain/events'
+import { createPhoneWriteService } from './sync/phoneWrites'
 import { createSyncScheduler } from './sync/scheduler'
 import { safeLogErrorMessage } from './logging'
 import { createOnlineIconSearchService } from './icons'
@@ -61,11 +64,22 @@ export function createHeadlessServer(options: HeadlessServerOptions = {}): Headl
   const syncStatus = options.database === undefined ? undefined : createCalendarSyncStatusService(options.database.sqlite, {
     publish: (data) => eventStream.publish({ type: 'sync.status', data })
   })
+  // The outbound queue is shared by both halves of write-back: the CalDAV
+  // drainer the sync tick runs, and the HTTP routes a phone drains (ADR 0007).
+  const eventWrites = options.database === undefined ? undefined : createEventWriteService(options.database.sqlite)
   const calendarSources = options.database === undefined || settings === undefined ? undefined : createCalendarSourceService(
     options.database.sqlite,
     () => settings.get().timezone,
-    { status: syncStatus, onEventsChanged: () => eventStream.publish({ type: 'query.invalidated', data: { resources: ['events'] } }) }
+    {
+      status: syncStatus,
+      writes: eventWrites,
+      onEventsChanged: () => eventStream.publish({ type: 'query.invalidated', data: { resources: ['events'] } })
+    }
   )
+  const eventAuthoring = options.database === undefined || eventWrites === undefined ? undefined
+    : createEventAuthoringService(options.database.sqlite, eventWrites)
+  const phoneWrites = options.database === undefined || eventWrites === undefined ? undefined
+    : createPhoneWriteService(options.database.sqlite, eventWrites)
   const syncScheduler = calendarSources === undefined ? undefined : createSyncScheduler(calendarSources)
   const chores = options.database === undefined ? undefined : createChoresRewardsService(options.database.sqlite, undefined, (event) => {
     eventStream.publish({
@@ -102,7 +116,7 @@ export function createHeadlessServer(options: HeadlessServerOptions = {}): Headl
         return device === undefined ? undefined : { type: 'display' as const, id: device.id }
       }
     }),
-    ...(auth === undefined || displays === undefined || settings === undefined || chores === undefined || people === undefined || syncStatus === undefined || displayRead === undefined || lists === undefined || meals === undefined ? {} : { auth, displays, displayEnrolment, parentDevices, settings, chores, people, media, syncStatus, calendarSources, syncScheduler, rss: createRssService(), displayRead, lists, meals, icons: createOnlineIconSearchService() })
+    ...(auth === undefined || displays === undefined || settings === undefined || chores === undefined || people === undefined || syncStatus === undefined || displayRead === undefined || lists === undefined || meals === undefined ? {} : { auth, displays, displayEnrolment, parentDevices, settings, chores, people, media, syncStatus, calendarSources, syncScheduler, rss: createRssService(), displayRead, lists, meals, icons: createOnlineIconSearchService(), eventAuthoring, phoneWrites })
   }, options.staticDir, options.companionStaticDir)
   let started: StartedHeadlessServer | undefined
 

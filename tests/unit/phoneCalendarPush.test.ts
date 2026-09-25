@@ -153,7 +153,9 @@ describe('phone calendar push', () => {
     // Catalogued, so the parent can choose it — but nothing reached the board.
     expect(storedEvents(h)).toEqual([])
     expect(JSON.parse((await h.call('GET', `/api/v1/calendar-sources/${sourceId}/calendars`)).body)).toEqual({
-      calendars: [{ id: 'phone:1', name: 'Personal', color: '#2F8FED', primary: false, readOnly: true, selected: false, audiencePersonId: null }]
+      // Writable since N06: the board queues a write and the phone drains the
+      // queue and applies it through the OS calendar API.
+      calendars: [{ id: 'phone:1', name: 'Personal', color: '#2F8FED', primary: false, readOnly: false, selected: false, audiencePersonId: null }]
     })
     expect(createEventFeedService(h.db.sqlite).family(WINDOW)).toEqual([])
 
@@ -225,7 +227,8 @@ describe('phone calendar push', () => {
       { source_event_id: 'swimming', title: 'Swimming', start_at: '2026-06-16T09:00:00Z', status: 'cancelled' }
     ])
     expect(createEventFeedService(h.db.sqlite).family(WINDOW).map((occurrence) => occurrence.title)).toEqual(['Dinner'])
-    expect(h.db.sqlite.prepare('SELECT last_pushed_at FROM calendars').get()).toEqual({ last_pushed_at: '2026-06-10T11:00:00Z' })
+    // Scoped past the seeded local calendar, which is never pushed to.
+    expect(h.db.sqlite.prepare("SELECT last_pushed_at FROM calendars WHERE id != 'osl-local-calendar'").get()).toEqual({ last_pushed_at: '2026-06-10T11:00:00Z' })
 
     // A push at the same instant as the stored one is not stale; only strictly
     // older is, so a phone re-pushing its current snapshot still works.
@@ -316,7 +319,7 @@ describe('phone calendar push', () => {
       forged as unknown as ServerResponse, h.deps
     )
     expect(forged.status).toBe(401)
-    expect(h.db.sqlite.prepare('SELECT count(*) AS count FROM calendars').get()).toEqual({ count: 0 })
+    expect(h.db.sqlite.prepare("SELECT count(*) AS count FROM calendars WHERE id != 'osl-local-calendar'").get()).toEqual({ count: 0 })
 
     const caldav = await h.call('POST', '/api/v1/calendar-sources', { kind: 'caldav', name: 'iCloud', baseUrl: 'https://caldav.example.test/', username: 'alice', password: 'app-password' })
     const refused = await h.call('POST', `/api/v1/calendar-sources/${(JSON.parse(caldav.body) as { id: string }).id}/push`, push('2026-06-10T09:00:00Z', [dinner]))

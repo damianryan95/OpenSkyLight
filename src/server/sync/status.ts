@@ -56,9 +56,14 @@ export function createCalendarSyncStatusService(sqlite: Database.Database, optio
   }
 
   function get(): SyncStatus {
+    // The board's own calendar is deliberately absent from sync health. It is
+    // never fetched, so it would report `never_synced` for ever and hold the
+    // whole household's state there while every real calendar was fine.
     const calendars = sqlite.prepare<[], CalendarRow>(`
-      SELECT id, name, last_sync_attempt_at, last_synced_at, sync_error
-      FROM calendars WHERE selected = 1 AND deleted_at IS NULL ORDER BY name, id
+      SELECT c.id, c.name, c.last_sync_attempt_at, c.last_synced_at, c.sync_error
+      FROM calendars c JOIN calendar_sources s ON s.id = c.source_id
+      WHERE c.selected = 1 AND c.deleted_at IS NULL AND s.deleted_at IS NULL AND s.kind != 'local'
+      ORDER BY c.name, c.id
     `).all().map((row) => ({
       id: row.id, name: row.name, lastAttemptAt: row.last_sync_attempt_at,
       lastSucceededAt: row.last_synced_at, error: row.sync_error
@@ -76,12 +81,34 @@ export function createCalendarSyncStatusService(sqlite: Database.Database, optio
       : calendars.some((calendar) => calendar.lastSucceededAt === null) ? 'never_synced'
       : calendars.some((calendar) => Date.parse(calendar.lastSucceededAt!) + staleAfterMs <= now().getTime()) ? 'stale'
       : 'fresh'
-    return { state, lastSyncedAt: lastSucceededAt, lastAttemptAt, lastSucceededAt, staleAfter, calendars }
+    return { state, lastSyncedAt: lastSucceededAt, lastAttemptAt, lastSucceededAt, staleAfter, calendars, writeBack: writeBack() }
   }
 
+  /**
+   * The outward direction, counted rather than derived from the sync state.
+   *
+   * Deliberately not folded into `state`: a queued write is the normal condition
+   * between an edit and the next tick, and treating it as ill health would make
+   * the board cry wolf every time a parent touched an event.
+   */
+  function writeBack(): SyncStatus['writeBack'] {
+    const counts = sqlite.prepare<[], { pending: number; failed: number }>(`
+      SELECT
+        COALESCE(SUM(CASE WHEN state = 'pending' THEN 1 ELSE 0 END), 0) AS pending,
+        COALESCE(SUM(CASE WHEN state = 'failed' THEN 1 ELSE 0 END), 0) AS failed
+      FROM event_writes
+    `).get()
+    const conflicts = sqlite.prepare<[], { count: number }>(
+      'SELECT COUNT(*) AS count FROM event_conflicts WHERE resolved_at IS NULL'
+    ).get()
+    return { pending: counts?.pending ?? 0, failed: counts?.failed ?? 0, conflicts: conflicts?.count ?? 0 }
+  }
+
+  /** Whether the household has connected anything. The seeded local calendar is
+   * not a connection, so "no calendar connected" still means exactly that. */
   function hasSource(): boolean {
     return sqlite.prepare<[], { count: number }>(
-      'SELECT COUNT(*) AS count FROM calendar_sources WHERE deleted_at IS NULL'
+      "SELECT COUNT(*) AS count FROM calendar_sources WHERE deleted_at IS NULL AND kind != 'local'"
     ).get()!.count > 0
   }
 

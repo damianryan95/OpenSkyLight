@@ -105,7 +105,9 @@ describe('calendar sources', () => {
     sources.remove(source.id)
 
     expect(sources.list()).toEqual([])
-    expect(db.sqlite.prepare('SELECT count(*) AS count FROM calendars').get()).toEqual({ count: 0 })
+    // The board's own calendar is seeded and survives every disconnection, so
+    // these counts are scoped to what was actually connected.
+    expect(db.sqlite.prepare("SELECT count(*) AS count FROM calendars WHERE id != 'osl-local-calendar'").get()).toEqual({ count: 0 })
     expect(db.sqlite.prepare('SELECT count(*) AS count FROM events').get()).toEqual({ count: 0 })
     db.close()
   })

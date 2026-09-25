@@ -185,8 +185,8 @@ O02 --> N12
 | N18 | Screen-displayed QR enrolment and household claim | in progress | N17 (ADR 0006 decided) |
 | N05 | Phone-native calendar connector (Android) | in progress | N13, N17 (ADR 0005 decided) |
 | N19 | iOS app platform and verification | blocked | N05; needs a Mac |
-| N06 | Bidirectional calendar sync | planned | N05, N14 |
-| N15 | On-screen calendar editing | planned | N06 |
+| N06 | Bidirectional calendar sync | in progress | N05, N14 |
+| N15 | On-screen calendar editing | in progress | N06 |
 | N16 | Install experience for a non-technical household | planned | — (ADR 0004 decided) |
 | N02 | Pi first-boot Wi-Fi AP pairing | planned | O02 |
 | N03 | Local network name for the server | planned | S06, O03 |

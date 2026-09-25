@@ -115,14 +115,20 @@ results, and the wizard path is proven end-to-end on a factory image.
 
 ## Milestone 3 — Anywhere access and two-way sync
 
-**Tickets:** `N07`, then `N06`, then `N15`
+**Tickets:** `N06`, then `N15`, then `N07`
 **Blocked by:** `N03`, `N04` (N07); `N05`, `N14` (N06); `N06` (N15)
 **Goal:** manage the board from anywhere over a self-hosted tunnel, and write
 events back to the underlying calendar.
 
+**Order corrected, 2026-09-25.** `N07` was written first here, but it is gated
+on `N03`/`N04` and therefore on Pi hardware, while `N06` and `N15` are gated on
+nothing. Both were taken first for the same reason `N03` and `N18` were pulled
+into Milestone 2: waiting on hardware is not a plan.
+
 `N07` requires a security review before merge per ADR 0003 — budget for it
-rather than treating it as a formality. `N06` should produce a short design
-note on conflict resolution before implementation starts.
+rather than treating it as a formality. The design note `N06` was to produce
+before implementation is [ADR 0007](adr/0007-calendar-write-back.md), which also
+settles `N15`'s routing and re-tag rules.
 
 `N15` restores on-screen event editing, which upstream had and the headless
 re-platforming removed. It is last in this milestone because it needs `N06`'s
@@ -132,6 +138,13 @@ rather than months later.
 
 **Exit criteria:** an external port scan finds no HTTP surface, PIN lockout is
 demonstrable, and a round-trip event edit reaches the parent's own calendar app.
+
+`N06` and `N15` are both built and both sit at `in progress`, because that last
+exit criterion is exactly what neither has been able to demonstrate: no real
+CalDAV account has been written to, and the Android write path has not run on a
+device. Everything that does not need a connected calendar — the board's own
+calendar, on-screen create/edit/delete, the PIN gate, recurrence, persistence
+across a restart — is driven and passing.
 
 ## Milestone 4 — Backup and resilience
 

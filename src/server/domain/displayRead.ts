@@ -1,5 +1,6 @@
 import type Database from 'better-sqlite3'
-import { DEFAULT_SETTINGS, type AppSettings, type CalendarDto, type CalendarProvider, type ChoreDto, type DayChoreDto, type OccurrenceDto, type RewardDto, type StarBalanceDto } from '../../shared/types'
+import { DEFAULT_SETTINGS, type AppSettings, type CalendarDto, type CalendarProvider, type ChoreDto, type DayChoreDto, type EventDto, type OccurrenceDto, type RewardDto, type StarBalanceDto } from '../../shared/types'
+import { parseRRuleString } from '../../shared/recurrence/build'
 import { createEventFeedService } from './eventFeeds'
 import { createChoresRewardsService, type ChoresRewardsService } from './choresRewards'
 import type { HouseholdSettingsService } from './settings'
@@ -21,24 +22,80 @@ export function createDisplayReadService(sqlite: Database.Database, chores: Chor
     return result
   }
 
+  /**
+   * `readOnly` is a property of the calendar, not of the client asking.
+   *
+   * It was previously hardcoded true, which was accurate while nothing could
+   * write anywhere. Since `N06` it answers the real question — will this
+   * calendar accept a change — and an ICS subscription is the case where the
+   * answer is permanently no. Whether *this* client may edit is a separate
+   * question, settled by the PIN gate on the write channel.
+   */
   function calendars(): CalendarDto[] {
     return sqlite.prepare(`
-      SELECT c.id, c.name, c.color, c.selected, s.kind
+      SELECT c.id, c.name, c.color, c.selected, c.read_only, s.kind
       FROM calendars c JOIN calendar_sources s ON s.id = c.source_id
       WHERE c.deleted_at IS NULL ORDER BY c.name COLLATE NOCASE
     `).all()
       .map((row) => {
-        const value = row as { id: string; name: string; color: string; selected: number; kind: CalendarProvider }
-        return { id: value.id, name: value.name, color: value.color, provider: value.kind, readOnly: true, visible: value.selected === 1 }
+        const value = row as { id: string; name: string; color: string; selected: number; read_only: number; kind: CalendarProvider }
+        return { id: value.id, name: value.name, color: value.color, provider: value.kind, readOnly: value.read_only === 1, visible: value.selected === 1 }
       })
   }
 
   function occurrences(window: { start: string; end: string }): OccurrenceDto[] {
+    const writable = new Set(calendars().filter((calendar) => !calendar.readOnly).map((calendar) => calendar.id))
     return feeds.family(window).map((item) => ({
       key: item.key, eventId: item.eventId, masterId: item.masterId, calendarId: item.calendarId, title: item.title,
       location: item.location, start: item.start, end: item.end, allDay: item.allDay, isRecurring: item.isRecurring,
-      readOnly: true, occurrenceStart: item.occurrenceStart, personIds: item.personIds
+      readOnly: !writable.has(item.calendarId), occurrenceStart: item.occurrenceStart, personIds: item.personIds
     }))
+  }
+
+  /**
+   * One event in full, for an editor to pre-fill from.
+   *
+   * A read, and deliberately so: the occurrence feed carries what a board needs
+   * to *render* an event, and an editor additionally needs the fields nothing
+   * displays — its description, the zone its recurrence pattern lives in, and the
+   * rule itself. Returning null for an unknown id rather than throwing keeps a
+   * stale tap on a deleted event from looking like a failure.
+   */
+  function event(id: string): EventDto | null {
+    const row = sqlite.prepare(`
+      SELECT e.id, e.calendar_id, e.title, e.description, e.location, e.start_at, e.end_at, e.timezone,
+             e.all_day, e.recurrence, e.recurring_event_id, e.original_start_at, e.status,
+             e.audience_person_id, c.audience_person_id AS calendar_person_id, c.read_only
+      FROM events e JOIN calendars c ON c.id = e.calendar_id
+      WHERE e.id = ? AND c.deleted_at IS NULL
+    `).get(id) as {
+      id: string; calendar_id: string; title: string; description: string | null; location: string | null
+      start_at: string; end_at: string; timezone: string; all_day: number; recurrence: string | null
+      recurring_event_id: string | null; original_start_at: string | null; status: 'confirmed' | 'cancelled'
+      audience_person_id: string | null; calendar_person_id: string | null; read_only: number
+    } | undefined
+    if (row === undefined) return null
+    const personId = row.audience_person_id ?? row.calendar_person_id
+    return {
+      id: row.id,
+      calendarId: row.calendar_id,
+      title: row.title,
+      description: row.description,
+      location: row.location,
+      startAt: row.start_at,
+      endAt: row.end_at,
+      tz: row.timezone,
+      allDay: row.all_day === 1,
+      rrule: row.recurrence,
+      recurrence: row.recurrence === null ? null : parseRRuleString(row.recurrence, row.timezone),
+      recurringEventId: row.recurring_event_id,
+      originalStartAt: row.original_start_at,
+      status: row.status,
+      readOnly: row.read_only === 1,
+      // The tag alone, not the inferred audience: an editor must show what was
+      // chosen, and offer to change it, rather than what a title happens to imply.
+      personIds: personId === null ? [] : [personId]
+    }
   }
 
   function choreDefinitions(): ChoreDto[] {
@@ -71,7 +128,7 @@ export function createDisplayReadService(sqlite: Database.Database, chores: Chor
       .map((row) => { const value = row as { id: string; title: string; icon: string | null; cost_stars: number; active: number }; return { id: value.id, title: value.title, icon: value.icon, costStars: value.cost_stars, active: value.active === 1 } })
   }
 
-  return { settings, calendars, occurrences, choreDefinitions, choresForDay, balances, rewards }
+  return { settings, calendars, occurrences, event, choreDefinitions, choresForDay, balances, rewards }
 }
 
 function isSleep(value: unknown): value is AppSettings['sleep'] {

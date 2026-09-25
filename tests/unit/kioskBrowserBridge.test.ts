@@ -67,8 +67,16 @@ describe('browser kiosk display-read RPC bridge', () => {
     }
     expect((await call('settings:getAll')).data).toMatchObject({ ok: true, data: { defaultView: 'home' } })
     expect((await call('people:list')).data).toMatchObject({ ok: true, data: [{ id: 'ava', name: 'Ava', themeId: 'minecraft', celebrationAssetId: null, celebrationEnabled: true, celebrationDurationMs: 3000 }] })
-    expect((await call('calendars:list')).data).toMatchObject({ ok: true, data: [{ id: 'calendar', readOnly: true }] })
-    expect((await call('events:getOccurrences', { start: '2026-06-01T00:00:00.000Z', end: '2026-06-03T00:00:00.000Z' })).data).toMatchObject({ ok: true, data: [{ title: 'Dinner', readOnly: true }] })
+    // The board's own calendar is seeded from first boot, so a display always
+    // sees it alongside whatever the household has connected. `readOnly` now
+    // reports whether the *calendar* will accept a write rather than being
+    // hardcoded true; whether this client may write is the PIN gate's business.
+    expect((await call('calendars:list')).data).toMatchObject({
+      ok: true, data: [{ id: 'calendar', readOnly: false }, { id: 'osl-local-calendar', provider: 'local', readOnly: false }]
+    })
+    // Writable because its calendar is a CalDAV collection that accepts writes.
+    // An event on an ICS feed would still report readOnly here.
+    expect((await call('events:getOccurrences', { start: '2026-06-01T00:00:00.000Z', end: '2026-06-03T00:00:00.000Z' })).data).toMatchObject({ ok: true, data: [{ title: 'Dinner', readOnly: false }] })
     expect((await call('lists:getAll')).data).toEqual({ ok: true, data: [] })
     database.close()
   })

@@ -8,10 +8,12 @@ import { mapCalendarDocument, type CachedIcalEvent } from './ical'
 import { commitCalendarEvents, syncWindow } from './pull'
 import { applicationKey, decryptSecret, encryptSecret } from './secrets'
 import type { CalendarSyncStatusService } from './status'
+import { createCalDavWriteBack } from './writeBack'
+import type { EventWriteService } from '../domain/eventWrites'
 
 interface SourceRow {
   id: string
-  kind: 'caldav' | 'ics' | 'phone'
+  kind: 'caldav' | 'ics' | 'phone' | 'local'
   name: string
   connected_at: string
   last_succeeded_at: string | null
@@ -75,6 +77,9 @@ export interface CalendarSourceServiceOptions {
   fetcher?: Fetcher
   status?: CalendarSyncStatusService
   onEventsChanged?: () => void
+  /** The outbound queue. Absent in read-only contexts and older tests, in which
+   * case nothing is written outward and sync behaves exactly as it did. */
+  writes?: EventWriteService
 }
 
 const SELECT_SOURCE = `SELECT id, kind, name, connected_at, last_succeeded_at, last_error, base_url, username, password_enc
@@ -105,9 +110,15 @@ export function createCalendarSourceService(
     return row
   }
 
+  /**
+   * The calendars the household has *connected*. The board's own calendar is
+   * excluded deliberately: it is seeded rather than connected, cannot be
+   * removed, and has no address or credential to show. Listing it beside real
+   * accounts would offer a parent a disconnect button that must always refuse.
+   */
   function list(): CalendarSourceDto[] {
     return sqlite.prepare<[], SourceRow>(`SELECT id, kind, name, connected_at, last_succeeded_at, last_error, base_url, username, password_enc
-      FROM calendar_sources WHERE deleted_at IS NULL ORDER BY connected_at`).all().map(toDto)
+      FROM calendar_sources WHERE deleted_at IS NULL AND kind != 'local' ORDER BY connected_at`).all().map(toDto)
   }
 
   function clientFor(row: SourceRow) {
@@ -143,7 +154,9 @@ export function createCalendarSourceService(
     sqlite.transaction(() => {
       sqlite.prepare("INSERT INTO calendar_sources (id, kind, name, connected_at, base_url) VALUES (?, 'ics', ?, ?, ?)")
         .run(id, name, timestamp, input.url)
-      sqlite.prepare('INSERT INTO calendars (id, source_id, source_calendar_id, name, selected) VALUES (?, ?, ?, ?, 1)')
+      // A subscription feed is read-only by nature: there is no protocol to
+      // write one back, so the routing rule must never target it.
+      sqlite.prepare('INSERT INTO calendars (id, source_id, source_calendar_id, name, selected, read_only) VALUES (?, ?, ?, ?, 1, 1)')
         .run(randomUUID(), id, input.url, name)
     })()
     return toDto(requireSource(id))
@@ -170,15 +183,15 @@ export function createCalendarSourceService(
     // discover over the network, and asking a CalDAV client would simply throw.
     // Unselected rows exist here, so selection is the column, not the presence.
     if (row.kind === 'phone') {
-      return sqlite.prepare<[string], { source_calendar_id: string; name: string; color: string; selected: number; audience_person_id: string | null }>(
-        'SELECT source_calendar_id, name, color, selected, audience_person_id FROM calendars WHERE source_id = ? AND deleted_at IS NULL ORDER BY name, source_calendar_id'
+      return sqlite.prepare<[string], { source_calendar_id: string; name: string; color: string; selected: number; audience_person_id: string | null; read_only: number }>(
+        'SELECT source_calendar_id, name, color, selected, audience_person_id, read_only FROM calendars WHERE source_id = ? AND deleted_at IS NULL ORDER BY name, source_calendar_id'
       ).all(sourceId).map((calendar) => ({
         url: calendar.source_calendar_id,
         name: calendar.name,
         color: calendar.color,
-        // The board cannot write back into a phone's calendar store, so every
-        // phone calendar is read-only to the household.
-        readOnly: true,
+        // Writable since N06: the board queues the write and the phone drains
+        // the queue and applies it through the OS calendar API.
+        readOnly: calendar.read_only === 1,
         selected: calendar.selected === 1,
         audiencePersonId: calendar.audience_person_id
       }))
@@ -195,7 +208,7 @@ export function createCalendarSourceService(
     }))
   }
 
-  function setCalendarSelection(input: { sourceId: string; url: string; name: string; color: string; selected: boolean; audiencePersonId: string | null }): void {
+  function setCalendarSelection(input: { sourceId: string; url: string; name: string; color: string; selected: boolean; audiencePersonId: string | null; readOnly?: boolean }): void {
     const row = requireSource(input.sourceId)
     if (input.audiencePersonId !== null) {
       const person = sqlite.prepare<[string], { id: string }>('SELECT id FROM people WHERE id = ? AND deleted_at IS NULL').get(input.audiencePersonId)
@@ -212,12 +225,15 @@ export function createCalendarSourceService(
       }
       return
     }
+    // An ICS feed is read-only whatever the caller claims; everything else is
+    // taken at its word, which for CalDAV is its own reported privilege set.
+    const readOnly = row.kind === 'ics' || input.readOnly ? 1 : 0
     if (existing === undefined) {
-      sqlite.prepare('INSERT INTO calendars (id, source_id, source_calendar_id, audience_person_id, name, color, selected) VALUES (?, ?, ?, ?, ?, ?, 1)')
-        .run(randomUUID(), row.id, input.url, input.audiencePersonId, input.name, input.color)
+      sqlite.prepare('INSERT INTO calendars (id, source_id, source_calendar_id, audience_person_id, name, color, selected, read_only) VALUES (?, ?, ?, ?, ?, ?, 1, ?)')
+        .run(randomUUID(), row.id, input.url, input.audiencePersonId, input.name, input.color, readOnly)
     } else {
-      sqlite.prepare('UPDATE calendars SET audience_person_id = ?, name = ?, color = ?, selected = 1, deleted_at = NULL WHERE id = ?')
-        .run(input.audiencePersonId, input.name, input.color, existing.id)
+      sqlite.prepare('UPDATE calendars SET audience_person_id = ?, name = ?, color = ?, selected = 1, read_only = ?, deleted_at = NULL WHERE id = ?')
+        .run(input.audiencePersonId, input.name, input.color, readOnly, existing.id)
     }
   }
 
@@ -304,17 +320,21 @@ export function createCalendarSourceService(
 
   function remove(sourceId: string): void {
     const row = requireSource(sourceId)
+    // The board's own calendar is not a connection and there is nothing to
+    // disconnect. Removing it would cascade away every event the household
+    // authored here, which is the one thing it can never be allowed to do.
+    if (row.kind === 'local') throw new DomainValidationError('The OpenSkyLight calendar cannot be removed.')
     // Calendars and their events cascade from the source row.
     sqlite.prepare('DELETE FROM calendar_sources WHERE id = ?').run(row.id)
   }
 
   async function syncSource(sourceId: string): Promise<{ changed: boolean }> {
     const row = requireSource(sourceId)
-    // A phone is pushed from, never pulled. Falling through would ask the
-    // CalDAV client for a source with no address and record that refusal as a
-    // sync failure on every scheduler tick, so a phone whose data is perfectly
-    // fresh would report as broken.
-    if (row.kind === 'phone') return { changed: false }
+    // A phone is pushed from, never pulled, and the board's own calendar has no
+    // remote at all. Falling through would ask the CalDAV client for a source
+    // with no address and record that refusal as a sync failure on every
+    // scheduler tick, so data that is perfectly fresh would report as broken.
+    if (row.kind === 'phone' || row.kind === 'local') return { changed: false }
     const calendars = sqlite.prepare<[string], { id: string; source_calendar_id: string }>(
       'SELECT id, source_calendar_id FROM calendars WHERE source_id = ? AND selected = 1 AND deleted_at IS NULL'
     ).all(row.id)
@@ -332,6 +352,23 @@ export function createCalendarSourceService(
       timezone = householdTimezone()
     } catch {
       failure = new Error('Set the household timezone before connecting a calendar.')
+    }
+
+    // Outward writes go first, so the pull immediately below reads a collection
+    // that already contains them. The other order would read the collection
+    // without our change, commit that, and make the board flicker back to the
+    // old version until the next tick.
+    if (timezone !== null && row.kind === 'caldav' && options.writes !== undefined) {
+      try {
+        await createCalDavWriteBack(sqlite, options.writes, {
+          now, householdTimezone: () => timezone!, onEventsChanged: options.onEventsChanged
+        }).drainSource(row.id, clientFor(row))
+      } catch (error) {
+        // The queue records its own per-write failures, so reaching here means
+        // the drain itself could not start. The pull must still happen: a
+        // household whose write cannot go out still needs a fresh board.
+        failure = error instanceof Error ? error : new Error('Calendar write-back failed.')
+      }
     }
 
     if (timezone !== null) {

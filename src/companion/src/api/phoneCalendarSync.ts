@@ -13,6 +13,7 @@ import {
   type TimeRange
 } from './phoneCalendarMapping'
 import { devicePhoneCalendarReader, requestCalendarPermission, type CalendarPermission, type PhoneCalendarReader } from './phoneCalendars'
+import { drainPhoneWriteQueue } from './phoneWriteQueue'
 import {
   clearPhoneSourceId,
   getClockOffsetMs,
@@ -286,6 +287,17 @@ async function performSync(options: PhoneSyncOptions): Promise<void> {
     if (shared.length === 0) {
       publish({ phase: 'idle', skippedSlices: 0 })
       return
+    }
+
+    // Outward writes are applied before the snapshot is read, not after. The
+    // other order reads the calendar without the event the board asked for, so
+    // the push would reconcile it straight back off the wall until the next run.
+    // A failure here is recorded per write on the server and must not abandon
+    // the push: a phone that cannot write still has a calendar worth sharing.
+    try {
+      await drainPhoneWriteQueue(sourceId, signal)
+    } catch (reason) {
+      if (reason instanceof DOMException && reason.name === 'AbortError') throw reason
     }
 
     const outcome = await pushWindow(sourceId, shared, reader, signal, 0)

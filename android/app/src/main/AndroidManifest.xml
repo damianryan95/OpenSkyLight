@@ -3,16 +3,18 @@
 
     <!--
       Reading the phone's own calendars (N05). The calendar plugin does not
-      declare this itself, so without it the runtime permission request is
+      declare these itself, so without them the runtime permission request is
       refused before the parent ever sees a prompt — the app simply reports no
       calendars, which looks like an empty phone rather than a missing
       permission.
 
-      Read-only on purpose. Writing back to the phone's calendar is N06, and
-      until that ticket is taken deliberately this app has no business holding
-      WRITE_CALENDAR.
+      WRITE_CALENDAR was added by N06: an event authored on the board and tagged
+      with a person whose calendar this phone holds is written into that calendar
+      here, because the server has no way to reach a phone's calendar store.
+      Both are requested together in one prompt.
     -->
     <uses-permission android:name="android.permission.READ_CALENDAR" />
+    <uses-permission android:name="android.permission.WRITE_CALENDAR" />
 
     <application
         android:allowBackup="true"

@@ -1,6 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import type { ChoreCreateInput, ChoreUpdateInput } from '@shared/types'
-import { rpc } from './client'
+import type { AuthoredEventDto, EventDraftDto, EventScope, UpdateEventRequest } from '@shared/api/contract'
+import { parentMutation, rpc } from './client'
 
 /** Phone tabs get suspended constantly — focus/reconnect refetch is the real
  * freshness mechanism; the 20s interval covers a phone left on the counter. */
@@ -76,6 +77,34 @@ export function useMealMutations() {
       [['meals']]
     )
   }
+}
+
+/**
+ * Authoring events from the parent's phone (`N06`).
+ *
+ * `scope` is what keeps a series intact: editing one occurrence records an
+ * override for that date, and only `series` touches the repeating event itself.
+ */
+export function useEventMutations() {
+  const keys = [['occurrences'], ['syncStatus']]
+  return {
+    create: useInvalidatingMutation((input: EventDraftDto) => parentMutation<AuthoredEventDto>('/api/v1/calendar-events', 'POST', input), keys),
+    update: useInvalidatingMutation(
+      (input: { id: string; patch: UpdateEventRequest; scope?: EventScope; occurrenceStart?: string }) =>
+        parentMutation<AuthoredEventDto>(`/api/v1/calendar-events/${encodeURIComponent(input.id)}${eventScopeQuery(input)}`, 'PATCH', input.patch),
+      keys
+    ),
+    remove: useInvalidatingMutation(
+      (input: { id: string; scope?: EventScope; occurrenceStart?: string }) =>
+        parentMutation<void>(`/api/v1/calendar-events/${encodeURIComponent(input.id)}${eventScopeQuery(input)}`, 'DELETE'),
+      keys
+    )
+  }
+}
+
+function eventScopeQuery(input: { scope?: EventScope; occurrenceStart?: string }): string {
+  if (input.scope !== 'occurrence' || input.occurrenceStart === undefined) return ''
+  return `?scope=occurrence&occurrenceStart=${encodeURIComponent(input.occurrenceStart)}`
 }
 
 export function useChoreMutations() {

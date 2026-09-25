@@ -1,7 +1,9 @@
 # N06 - Bidirectional calendar sync
 
-Status: planned
+Status: in progress (built and server-verified; unproven against a real CalDAV
+account and a real Android device)
 Depends on: N05, N14
+Design note: [ADR 0007](../adr/0007-calendar-write-back.md)
 
 ## Context
 
@@ -64,3 +66,51 @@ connector from `N05`, `src/shared/api/contract.ts`, tests.
 Verify: round-trip tests per source type, offline-queue and
 exactly-once-replay tests, concurrent-edit conflict tests, and a regression
 run of the `K03` read-only display tests.
+
+
+## Built (2026-09-25)
+
+The decisions the ticket deferred are settled in
+[ADR 0007](../adr/0007-calendar-write-back.md): last-writer-wins by
+modification time with the losing version recorded, and re-tagging moves only
+an event the board itself authored.
+
+The last acceptance line — "the kiosk gains no write capability" — was
+**deliberately overtaken by `N15`**, which narrows `K03` for calendar events
+behind the household PIN. `K03` records what still holds.
+
+### What is proven
+
+- CalDAV create, update and delete against a collection that enforces real
+  preconditions: `If-None-Match` on a create, `If-Match` on an update, and
+  412 on both. A replayed create settles instead of duplicating.
+- The queue coalesces repeated edits into one write, survives an unreachable
+  source, applies exactly once on reconnect, and parks a write that has
+  exhausted its attempts.
+- Both directions of the conflict rule, each writing an `event_conflicts` row
+  carrying the discarded version.
+- The routing rule in all four cases, including a person whose only calendar is
+  read-only being treated exactly like a person with none.
+- The phone queue over its real HTTP routes, including the case that motivates
+  the mirror column: a board-authored event pushed straight back by the phone
+  shows **once**.
+
+### What is not
+
+- No real CalDAV account has been written to. The fake collection mirrors the
+  spec, not any particular provider, and ADR 0002's own risk register expects
+  providers to differ.
+- The Android write path (`phoneWriteQueue.ts`, `WRITE_CALENDAR`) is written but
+  has never run on a device. Its recurrence translation is unit-tested; the
+  plugin calls are not.
+
+Until both are driven, this ticket is `in progress`.
+
+### Rebuild the volume
+
+Migration 001 was amended in place to add the `local` source kind, because
+SQLite cannot `ALTER` a `CHECK` constraint. Per the delivery plan's greenfield
+posture, **existing databases must be deleted and rebuilt** — a development
+`data/openskylight.db` and the Portainer stack's volume alike. A database left
+at the old schema will not carry the constraint and will reject the seeded
+calendar.

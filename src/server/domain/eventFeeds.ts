@@ -1,6 +1,6 @@
 import type Database from 'better-sqlite3'
 import { deriveEffectivePersonIds, type AudiencePerson } from '../../shared/audience'
-import type { EventFeedOccurrence, EventFeedWindow } from '../../shared/eventFeeds'
+import { eventSourceKey, type EventFeedOccurrence, type EventFeedWindow } from '../../shared/eventFeeds'
 import { expandOccurrences, type ExceptionLike, type MasterEventLike } from '../../shared/recurrence/expand'
 
 export type { EventFeedOccurrence, EventFeedWindow } from '../../shared/eventFeeds'
@@ -11,7 +11,7 @@ interface EventRow {
   source_event_id: string
   ical_uid: string | null
   remote_updated_at: string | null
-  source_kind: 'caldav' | 'ics' | 'phone'
+  source_kind: 'caldav' | 'ics' | 'phone' | 'local'
   title: string
   description: string | null
   location: string | null
@@ -25,7 +25,12 @@ interface EventRow {
   recurring_event_id: string | null
   original_start_at: string | null
   status: 'confirmed' | 'cancelled'
+  /** The calendar-wide audience mapping. */
   audience_person_id: string | null
+  /** This event's own tag, which overrides its calendar's mapping. */
+  event_audience_person_id: string | null
+  /** The outward copy of a board-authored event, as an `eventSourceKey`. */
+  mirror_key: string | null
 }
 
 function parsedDates(value: string | null): string[] | null {
@@ -110,6 +115,25 @@ function preferredMasters(masters: readonly EventRow[]): EventRow[] {
   return masters.filter((master) => master.ical_uid === null || winners.get(master.ical_uid) === master)
 }
 
+/**
+ * Drops the outward copy of an event the board authored.
+ *
+ * When a board-authored event is written to a person's own calendar, the next
+ * sync reads it straight back in, so the household would see it twice. UID
+ * deduplication cannot always catch that: Android's calendar provider exposes no
+ * iCalendar UID at all, so the copy returns carrying nothing to match on. The
+ * write path therefore records where the copy went, and the row it names is the
+ * one that goes — the board's own row is the copy the household edits.
+ */
+function withoutMirroredCopies(rows: readonly EventRow[]): EventRow[] {
+  const mirrored = new Set<string>()
+  for (const row of rows) {
+    if (row.mirror_key !== null) mirrored.add(row.mirror_key)
+  }
+  if (mirrored.size === 0) return rows as EventRow[]
+  return rows.filter((row) => !mirrored.has(eventSourceKey(row.calendar_id, row.source_event_id)))
+}
+
 function assertWindow(window: EventFeedWindow): void {
   const start = Date.parse(window.start)
   const end = Date.parse(window.end)
@@ -131,7 +155,8 @@ export function createEventFeedService(sqlite: Database.Database) {
     SELECT e.id, e.calendar_id, e.source_event_id, e.ical_uid, e.title, e.description, e.location,
            e.start_at, e.end_at, e.timezone, e.all_day, e.recurrence, e.recurrence_exdates,
            e.recurrence_rdates, e.recurring_event_id, e.original_start_at, e.status,
-           e.remote_updated_at, c.audience_person_id, s.kind AS source_kind
+           e.remote_updated_at, c.audience_person_id, e.audience_person_id AS event_audience_person_id,
+           e.mirror_key, s.kind AS source_kind
     FROM events e
     JOIN calendars c ON c.id = e.calendar_id
     JOIN calendar_sources s ON s.id = c.source_id
@@ -142,13 +167,13 @@ export function createEventFeedService(sqlite: Database.Database) {
   function occurrences(window: EventFeedWindow): EventFeedOccurrence[] {
     assertWindow(window)
     const people = peopleStatement.all()
-    const rows = eventStatement.all()
+    const rows = withoutMirroredCopies(eventStatement.all())
     const masters = preferredMasters(rows.filter((row) => row.recurring_event_id === null && row.status === 'confirmed'))
-    const masterBySourceKey = new Map(masters.map((row) => [`${row.calendar_id}\u0000${row.source_event_id}`, row]))
+    const masterBySourceKey = new Map(masters.map((row) => [eventSourceKey(row.calendar_id, row.source_event_id), row]))
     const exceptionsByMaster = new Map<string, EventRow[]>()
     for (const row of rows) {
       if (row.recurring_event_id === null) continue
-      const master = masterBySourceKey.get(`${row.calendar_id}\u0000${row.recurring_event_id}`)
+      const master = masterBySourceKey.get(eventSourceKey(row.calendar_id, row.recurring_event_id))
       if (master === undefined) continue // A partial cache cannot safely expand an orphaned exception.
       const exceptions = exceptionsByMaster.get(master.id) ?? []
       exceptions.push(row)
@@ -175,7 +200,10 @@ export function createEventFeedService(sqlite: Database.Database) {
       for (const occurrence of expanded) {
         const row = rowsById.get(occurrence.eventId)!
         const personIds = deriveEffectivePersonIds({
-          mappedPersonId: master.audience_person_id,
+          // An event's own tag beats its calendar's mapping, which is what makes
+          // a shared family calendar — the board's own included — able to say
+          // that one particular event is Sam's.
+          mappedPersonId: row.event_audience_person_id ?? master.event_audience_person_id ?? master.audience_person_id,
           title: row.title,
           description: row.description,
           people

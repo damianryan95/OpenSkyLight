@@ -22,9 +22,14 @@ const migrations: readonly string[] = [
     -- A connected calendar provider. Provider-agnostic by design: CalDAV
     -- collections, read-only ICS feeds, and phone-native pushes all register
     -- here. Credentials belong to the source implementation, not this table.
+    --
+    -- 'local' is the board's own calendar (ADR 0007) and is the odd one out: it
+    -- has no remote, is never fetched or pushed, and is seeded once in migration
+    -- 013. The constraint is amended here rather than in a later migration
+    -- because SQLite cannot ALTER a CHECK, and the deployment is greenfield.
     CREATE TABLE calendar_sources (
       id TEXT PRIMARY KEY,
-      kind TEXT NOT NULL CHECK (kind IN ('caldav', 'ics', 'phone')),
+      kind TEXT NOT NULL CHECK (kind IN ('caldav', 'ics', 'phone', 'local')),
       name TEXT NOT NULL,
       connected_at TEXT NOT NULL,
       last_attempted_at TEXT,
@@ -342,6 +347,105 @@ const migrations: readonly string[] = [
       redeemed_at TEXT,
       display_id TEXT REFERENCES devices(id) ON DELETE CASCADE
     );
+  `,
+
+  // 013 - calendar write-back (ADR 0007). Three things, all serving one rule:
+  // an event authored here lives on the board's own calendar, and travels
+  // outward only when a tagged person has somewhere writable to put it.
+  `
+    -- The board's own calendar. Seeded, not connected: it has no address and no
+    -- credential, the sync scheduler must skip it, and removing a source must
+    -- never remove it. Its ids are fixed constants in src/shared/localCalendar.ts.
+    INSERT INTO calendar_sources (id, kind, name, connected_at)
+    VALUES ('osl-local-source', 'local', 'OpenSkyLight', '1970-01-01T00:00:00.000Z');
+
+    INSERT INTO calendars (id, source_id, source_calendar_id, name, color, selected)
+    VALUES ('osl-local-calendar', 'osl-local-source', 'openskylight', 'OpenSkyLight', '#0091FF', 1);
+
+    -- Who authored an event. This is the whole basis of the re-tag rule: moving
+    -- an event means deleting it from a calendar, and that is only ever safe on
+    -- one we created. A re-tagged remote event changes board audience only.
+    ALTER TABLE events ADD COLUMN origin TEXT NOT NULL DEFAULT 'remote'
+      CHECK (origin IN ('local', 'remote'));
+
+    -- Where a local event's outward copy ended up, as the same
+    -- "<calendar_id>\\u0000<source_event_id>" key the feed already resolves
+    -- exceptions by. The feed suppresses whichever row another row mirrors, so
+    -- one event authored here shows once even after it syncs outward and is read
+    -- straight back in.
+    --
+    -- UID deduplication cannot do this job alone: Android's calendar provider
+    -- exposes no iCalendar UID at all, so a phone's copy of a board-authored
+    -- event arrives with a null UID and nothing to match on.
+    ALTER TABLE events ADD COLUMN mirror_key TEXT;
+
+    -- The person tagged in one event. Audience was previously a property of a
+    -- whole calendar, which cannot express "this event is Sam's" on a shared
+    -- family calendar — and the board's own calendar is exactly that. An event
+    -- tag overrides its calendar's mapping; both still fall back to the name
+    -- inference in shared/audience.ts.
+    --
+    -- This is also the input to the routing rule: tagging a person who has a
+    -- writable calendar is what sends an event outward.
+    ALTER TABLE events ADD COLUMN audience_person_id TEXT REFERENCES people(id) ON DELETE SET NULL;
+    CREATE INDEX idx_events_audience_person ON events(audience_person_id);
+
+    -- Whether the source will accept a write. Previously computed live from
+    -- CalDAV privileges and then discarded, which left the routing rule unable
+    -- to answer "does this person have a *writable* calendar" without a network
+    -- call. An ICS feed is always read-only; a CalDAV collection reports itself.
+    ALTER TABLE calendars ADD COLUMN read_only INTEGER NOT NULL DEFAULT 0
+      CHECK (read_only IN (0, 1));
+
+    -- The board's own calendar is writable by definition; an ICS feed never is.
+    UPDATE calendars SET read_only = 1
+      WHERE source_id IN (SELECT id FROM calendar_sources WHERE kind = 'ics');
+
+    -- The outbound queue. Every write goes through it, so an unreachable source
+    -- behaves the same whether the edit came from the wall or from a phone.
+    --
+    -- UNIQUE (calendar_id, ical_uid) is what makes a queue rather than a log:
+    -- four edits before the source returns coalesce into one write carrying the
+    -- final state. 'sent' rows are kept, not deleted, because source_event_id
+    -- recorded from an acknowledged create is what turns a crash replay into an
+    -- update instead of a duplicate event.
+    -- The event_id column is nullable and does NOT cascade, which is load-bearing: the
+    -- commonest reason to queue a write is that the event was just deleted here,
+    -- and a cascade would destroy the instruction to delete it there too. The
+    -- row carries everything the write needs without the event: its calendar,
+    -- its UID, the payload, and the etag to make the delete conditional.
+    CREATE TABLE event_writes (
+      id TEXT PRIMARY KEY,
+      event_id TEXT REFERENCES events(id) ON DELETE SET NULL,
+      calendar_id TEXT NOT NULL REFERENCES calendars(id) ON DELETE CASCADE,
+      ical_uid TEXT NOT NULL,
+      operation TEXT NOT NULL CHECK (operation IN ('create', 'update', 'delete')),
+      payload TEXT NOT NULL,
+      etag TEXT,
+      source_event_id TEXT,
+      state TEXT NOT NULL DEFAULT 'pending' CHECK (state IN ('pending', 'sent', 'failed')),
+      attempts INTEGER NOT NULL DEFAULT 0 CHECK (attempts >= 0),
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      last_attempt_at TEXT,
+      last_error TEXT,
+      UNIQUE (calendar_id, ical_uid)
+    );
+    CREATE INDEX idx_event_writes_pending ON event_writes(calendar_id, created_at) WHERE state = 'pending';
+
+    -- What last-writer-wins discarded. ADR 0007 permits the rule only because
+    -- this table exists: the losing version is recoverable and visible to a
+    -- parent rather than silently gone.
+    CREATE TABLE event_conflicts (
+      id TEXT PRIMARY KEY,
+      event_id TEXT REFERENCES events(id) ON DELETE SET NULL,
+      calendar_id TEXT NOT NULL REFERENCES calendars(id) ON DELETE CASCADE,
+      discarded_side TEXT NOT NULL CHECK (discarded_side IN ('local', 'remote')),
+      discarded_payload TEXT NOT NULL,
+      detected_at TEXT NOT NULL,
+      resolved_at TEXT
+    );
+    CREATE INDEX idx_event_conflicts_open ON event_conflicts(detected_at) WHERE resolved_at IS NULL;
   `
 ]
 

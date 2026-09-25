@@ -1,7 +1,7 @@
 import type { IncomingMessage, ServerResponse } from 'node:http'
 import { z } from 'zod'
 import { DateTime } from 'luxon'
-import { addListItemRequestSchema, apiContract, apiInfoResponseSchema, choreCorrectionRequestSchema, claimEnrolmentRequestSchema, claimEnrolmentResponseSchema, connectCalDavRequestSchema, connectIcsRequestSchema, connectPhoneRequestSchema, displayDeviceSchema, enrolDisplayRequestSchema, enrolmentCodeSchema, pushPhoneCalendarsConflictSchema, pushPhoneCalendarsRequestSchema, pushPhoneCalendarsResponseSchema, setCalendarSelectionRequestSchema, createChoreRequestSchema, createListRequestSchema, createPersonRequestSchema, createRewardRequestSchema, displayChoreCommandRequestSchema, mealRangeRequestSchema, mealSlotKindSchema, pairParentDeviceRequestSchema, redeemRewardRequestSchema, registerDisplayRequestSchema, setMealRequestSchema, setMealTemplateRequestSchema, starAdjustmentRequestSchema, updateChoreRequestSchema, updateDisplayRequestSchema, updateHouseholdSettingsRequestSchema, updateListRequestSchema, updatePersonRequestSchema, updateRewardRequestSchema } from '../../shared/api/contract'
+import { ackEventWritesRequestSchema, ackEventWritesResponseSchema, addListItemRequestSchema, authoredEventSchema, eventDraftSchema, eventScopeSchema, updateEventRequestSchema, apiContract, apiInfoResponseSchema, choreCorrectionRequestSchema, claimEnrolmentRequestSchema, claimEnrolmentResponseSchema, connectCalDavRequestSchema, connectIcsRequestSchema, connectPhoneRequestSchema, displayDeviceSchema, enrolDisplayRequestSchema, enrolmentCodeSchema, pendingEventWritesResponseSchema, pushPhoneCalendarsConflictSchema, pushPhoneCalendarsRequestSchema, pushPhoneCalendarsResponseSchema, setCalendarSelectionRequestSchema, createChoreRequestSchema, createListRequestSchema, createPersonRequestSchema, createRewardRequestSchema, displayChoreCommandRequestSchema, mealRangeRequestSchema, mealSlotKindSchema, pairParentDeviceRequestSchema, redeemRewardRequestSchema, registerDisplayRequestSchema, setMealRequestSchema, setMealTemplateRequestSchema, starAdjustmentRequestSchema, updateChoreRequestSchema, updateDisplayRequestSchema, updateHouseholdSettingsRequestSchema, updateListRequestSchema, updatePersonRequestSchema, updateRewardRequestSchema } from '../../shared/api/contract'
 import { AuthError, CSRF_HEADER, DisplayDeviceService, DisplayEnrolmentService, HouseholdAuthService, ParentDeviceService, PARENT_SESSION_COOKIE } from '../auth'
 import { type ChoresRewardsService, type DisplayReadService, type HouseholdSettingsService, type ListsDomain, type MealsDomain, type PeopleService, type MediaService } from '../domain'
 import { createReadStream } from 'node:fs'
@@ -11,6 +11,8 @@ import type { CalendarSourceService } from '../sync/sources'
 import type { SyncScheduler } from '../sync/scheduler'
 import type { OnlineIconSearchService } from '../icons'
 import type { RssService } from '../domain/rss'
+import type { EventAuthoringService } from '../domain/events'
+import type { PhoneWriteService } from '../sync/phoneWrites'
 import { ApiRequestError, readBinaryBody, readJsonBody, sendApiError, sendJson, validateApiInput } from './http'
 
 export interface ApiRouterDependencies {
@@ -32,6 +34,11 @@ export interface ApiRouterDependencies {
   icons?: OnlineIconSearchService
   media?: MediaService
   rss?: RssService
+  /** Event authoring (ADR 0007). Absent leaves the board read-only, which is
+   * exactly how every display behaved before `N15`. */
+  eventAuthoring?: EventAuthoringService
+  /** The outbound queue a phone drains. */
+  phoneWrites?: PhoneWriteService
   /** Injectable clock for household-date authorization tests. */
   now?: () => Date
 }
@@ -53,6 +60,17 @@ function requireSources(dependencies: ApiRouterDependencies): CalendarSourceServ
   if (dependencies.calendarSources === undefined) throw new ApiRequestError(503, 'service_unavailable', 'Calendar sources are unavailable')
   return dependencies.calendarSources
 }
+
+function requirePhoneWrites(dependencies: ApiRouterDependencies): PhoneWriteService {
+  if (dependencies.phoneWrites === undefined) throw new ApiRequestError(503, 'service_unavailable', 'Calendar write-back is unavailable')
+  return dependencies.phoneWrites
+}
+
+function requireEventAuthoring(dependencies: ApiRouterDependencies): EventAuthoringService {
+  if (dependencies.eventAuthoring === undefined) throw new ApiRequestError(503, 'service_unavailable', 'Event editing is unavailable')
+  return dependencies.eventAuthoring
+}
+
 
 export async function handleApiRequest(request: IncomingMessage, response: ServerResponse, dependencies: ApiRouterDependencies = {}): Promise<boolean> {
   const method = request.method ?? 'GET'
@@ -388,6 +406,54 @@ export async function handleApiRequest(request: IncomingMessage, response: Serve
       response.writeHead(204); response.end(); return true
     }
 
+    // Authoring events (ADR 0007). Parent-gated like every other mutation; the
+    // wall display reaches the same service through its own PIN-bounded RPC.
+    //
+    // `/api/v1/calendar-events` rather than `/api/v1/events`, which is already
+    // the server-sent event stream. Two different things called "events" is the
+    // repo's own naming, and this is the boundary where it would silently bite.
+    if (path === '/api/v1/calendar-events') {
+      if (method !== 'POST') throw new ApiRequestError(405, 'method_not_allowed', `Method ${method} is not allowed`)
+      requireParentMutation(dependencies, request)
+      const created = requireEventAuthoring(dependencies).create(await readJsonBody(request, eventDraftSchema))
+      publishInvalidation(dependencies, ['events'])
+      sendJson(response, 201, authoredEventSchema.parse(created))
+      return true
+    }
+
+    const eventMatch = /^\/api\/v1\/calendar-events\/([^/]+)$/.exec(path)
+    if (eventMatch !== null) {
+      requireParentMutation(dependencies, request)
+      const events = requireEventAuthoring(dependencies)
+      const eventId = decodeURIComponent(eventMatch[1])
+      // Which of a series is meant travels in the query string rather than the
+      // body, because a delete has no body to put it in and the two operations
+      // must not disagree about how to say the same thing.
+      const url = new URL(request.url ?? '/', 'http://localhost')
+      const scope = eventScopeSchema.catch('series').parse(url.searchParams.get('scope') ?? 'series')
+      const occurrenceStart = url.searchParams.get('occurrenceStart')
+      if (scope === 'occurrence' && occurrenceStart === null) {
+        throw new ApiRequestError(400, 'bad_request', 'Editing one occurrence needs the occurrence it means')
+      }
+
+      if (method === 'PATCH') {
+        const patch = await readJsonBody(request, updateEventRequestSchema)
+        const result = scope === 'occurrence'
+          ? events.updateOccurrence(eventId, occurrenceStart!, patch)
+          : events.update(eventId, patch)
+        publishInvalidation(dependencies, ['events'])
+        sendJson(response, 200, authoredEventSchema.parse(result))
+        return true
+      }
+      if (method === 'DELETE') {
+        if (scope === 'occurrence') events.removeOccurrence(eventId, occurrenceStart!)
+        else events.remove(eventId)
+        publishInvalidation(dependencies, ['events'])
+        response.writeHead(204); response.end(); return true
+      }
+      throw new ApiRequestError(405, 'method_not_allowed', `Method ${method} is not allowed`)
+    }
+
     if (path === '/api/v1/calendar-sources') {
       const sources = requireSources(dependencies)
       if (method === 'GET') { requireParentRead(dependencies, request); sendJson(response, 200, { sources: sources.list() }); return true }
@@ -414,11 +480,31 @@ export async function handleApiRequest(request: IncomingMessage, response: Serve
       response.writeHead(202); response.end(); return true
     }
 
-    const sourceMatch = /^\/api\/v1\/calendar-sources\/([^/]+)(?:\/(calendars|push))?$/.exec(path)
+    const sourceMatch = /^\/api\/v1\/calendar-sources\/([^/]+)(?:\/(calendars|push|pending-writes|pending-writes\/ack))?$/.exec(path)
     if (sourceMatch !== null) {
       const sources = requireSources(dependencies)
       const sourceId = decodeURIComponent(sourceMatch[1])
       const calendars = sourceMatch[2] === 'calendars'
+
+      // Write-back to a phone, which runs the opposite way round: the phone asks
+      // what is outstanding and applies it itself (ADR 0007).
+      if (sourceMatch[2] === 'pending-writes' && method === 'GET') {
+        requireParentRead(dependencies, request)
+        const phoneWrites = requirePhoneWrites(dependencies)
+        sendJson(response, 200, pendingEventWritesResponseSchema.parse({ writes: phoneWrites.pending(sourceId) }))
+        return true
+      }
+      if (sourceMatch[2] === 'pending-writes/ack' && method === 'POST') {
+        requireParentMutation(dependencies, request)
+        const phoneWrites = requirePhoneWrites(dependencies)
+        const input = await readJsonBody(request, ackEventWritesRequestSchema)
+        const result = phoneWrites.acknowledge(sourceId, input)
+        // An applied write changes what the board shows, because the mirror it
+        // records is what stops the pushed-back copy appearing twice.
+        if (result.applied > 0) publishInvalidation(dependencies, ['events'])
+        sendJson(response, 200, ackEventWritesResponseSchema.parse(result))
+        return true
+      }
       if (sourceMatch[2] === 'push' && method === 'POST') {
         // Parent-authenticated like every other mutation; the paired app
         // reaches it over the bearer path. The payload is never logged: it is
@@ -451,7 +537,7 @@ export async function handleApiRequest(request: IncomingMessage, response: Serve
         const input = await readJsonBody(request, setCalendarSelectionRequestSchema)
         sources.setCalendarSelection({
           sourceId, url: input.calendar.id, name: input.calendar.name, color: input.calendar.color,
-          selected: input.selected, audiencePersonId: input.audiencePersonId
+          selected: input.selected, audiencePersonId: input.audiencePersonId, readOnly: input.calendar.readOnly
         })
         if (input.selected) void dependencies.syncScheduler?.syncNow()
         publishInvalidation(dependencies, ['events'])
@@ -684,7 +770,7 @@ async function handleDisplayReadRpc(
     }
     case 'settings:getAll': return read.settings(device)
     case 'settings:set': {
-      if ((displayLayoutEditUntil.get(device.id) ?? 0) < Date.now()) throw new AuthError(403, 'forbidden', 'Enter the parent PIN before changing this display layout')
+      if ((displayEditUntil.get(device.id) ?? 0) < Date.now()) throw new AuthError(403, 'forbidden', 'Enter the parent PIN before changing this display layout')
       const input = await readJsonBody(request, z.object({ patch: z.object({ homeLayout: z.unknown() }).strict() }).strict())
       const updated = dependencies.displays.update(device.id, { homeLayout: input.patch.homeLayout })
       return read.settings(updated)
@@ -694,6 +780,39 @@ async function handleDisplayReadRpc(
     case 'events:getOccurrences': {
       const input = await readJsonBody(request, z.object({ start: z.string(), end: z.string() }).strict())
       return read.occurrences(input)
+    }
+    case 'events:get': {
+      const input = await readJsonBody(request, z.object({ id: z.string().min(1) }).strict())
+      return read.event(input.id)
+    }
+    // N15 narrows K03 for calendar events only, and only inside the PIN-bounded
+    // window `auth:verifyPin` opens. Everything else a display might mutate is
+    // still refused by the `default` arm below — deliberately, and with tests
+    // asserting the narrower boundary rather than the absence of one.
+    case 'events:create': {
+      requireDisplayEditWindow(device)
+      const created = requireEventAuthoring(dependencies).create(await readJsonBody(request, eventDraftSchema))
+      publishInvalidation(dependencies, ['events'])
+      return created
+    }
+    case 'events:update': {
+      requireDisplayEditWindow(device)
+      const input = await readJsonBody(request, displayEventUpdateSchema)
+      const events = requireEventAuthoring(dependencies)
+      const result = input.scope === 'occurrence'
+        ? events.updateOccurrence(input.id, input.occurrenceStart, input.patch)
+        : events.update(input.id, input.patch)
+      publishInvalidation(dependencies, ['events'])
+      return result
+    }
+    case 'events:delete': {
+      requireDisplayEditWindow(device)
+      const input = await readJsonBody(request, displayEventDeleteSchema)
+      const events = requireEventAuthoring(dependencies)
+      if (input.scope === 'occurrence') events.removeOccurrence(input.id, input.occurrenceStart)
+      else events.remove(input.id)
+      publishInvalidation(dependencies, ['events'])
+      return undefined
     }
     case 'chores:list': return read.choreDefinitions()
     case 'chores:getDay': {
@@ -721,13 +840,13 @@ async function handleDisplayReadRpc(
       if (dependencies.media === undefined) return []
       return dependencies.media.listPhotos().map((photo: { id: string }) => `/api/v1/display/media/${encodeURIComponent(photo.id)}`)
     }
-    case 'auth:getStatus': return { pinSet: true, unlocked: (displayLayoutEditUntil.get(device.id) ?? 0) >= Date.now() }
+    case 'auth:getStatus': return { pinSet: true, unlocked: (displayEditUntil.get(device.id) ?? 0) >= Date.now() }
     case 'auth:verifyPin': {
       const { pin } = await readJsonBody(request, pinRequestSchema)
-      try { const session = dependencies.auth.login(pin); dependencies.auth.logout(session.sessionToken); displayLayoutEditUntil.set(device.id, Date.now() + 10 * 60_000); return { valid: true } }
+      try { const session = dependencies.auth.login(pin); dependencies.auth.logout(session.sessionToken); displayEditUntil.set(device.id, Date.now() + 10 * 60_000); return { valid: true } }
       catch (error) { if (error instanceof AuthError && error.status === 401) return { valid: false }; throw error }
     }
-    case 'auth:lock': displayLayoutEditUntil.delete(device.id); return undefined
+    case 'auth:lock': displayEditUntil.delete(device.id); return undefined
     case 'sync:getStatus': {
       // Previously a hardcoded 'idle', which reported fiction to the kiosk
       // while the connectivity pill showed the real state.
@@ -745,7 +864,39 @@ async function handleDisplayReadRpc(
   }
 }
 
-const displayLayoutEditUntil = new Map<string, number>()
+/**
+ * Displays with a live parent unlock, and when it expires.
+ *
+ * In memory on purpose: a restart must relock every screen in the house, and a
+ * window that outlived the process would be a wall-mounted board left writable by
+ * a parent who walked away an hour ago.
+ */
+const displayEditUntil = new Map<string, number>()
+
+/** The gate `N15` puts in front of event writes from a wall display. A locked
+ * screen is refused the same way it was before the channel existed. */
+function requireDisplayEditWindow(device: { id: string }): void {
+  if ((displayEditUntil.get(device.id) ?? 0) < Date.now()) {
+    throw new AuthError(403, 'forbidden', 'Enter the parent PIN before changing the calendar on this display')
+  }
+}
+
+/** A display names the occurrence it means in the body; there is no query string
+ * on an RPC channel. Otherwise identical to the parent route's rules. */
+const displayEventUpdateSchema = z.union([
+  z.object({ id: z.string().min(1), scope: z.literal('series').optional(), patch: updateEventRequestSchema }).strict()
+    .transform((value) => ({ ...value, scope: 'series' as const, occurrenceStart: '' })),
+  z.object({
+    id: z.string().min(1), scope: z.literal('occurrence'),
+    occurrenceStart: z.string().datetime({ offset: true }), patch: updateEventRequestSchema
+  }).strict()
+])
+
+const displayEventDeleteSchema = z.union([
+  z.object({ id: z.string().min(1), scope: z.literal('series').optional() }).strict()
+    .transform((value) => ({ ...value, scope: 'series' as const, occurrenceStart: '' })),
+  z.object({ id: z.string().min(1), scope: z.literal('occurrence'), occurrenceStart: z.string().datetime({ offset: true }) }).strict()
+])
 
 async function displayRpcChoreCommand(
   request: IncomingMessage,

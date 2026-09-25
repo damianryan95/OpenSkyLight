@@ -39,6 +39,7 @@ fix, not a thing to work around.
 | What to build next, and its gates | `docs/delivery-plan.md` |
 | A specific scoped task | `docs/tickets/` and its `README.md` |
 | Why calendars work as they do | `docs/adr/0002-provider-agnostic-calendar-access.md` |
+| Where an authored event goes, and who wins a conflict | `docs/adr/0007-calendar-write-back.md` |
 | Why remote access works as it does | `docs/adr/0003-self-hosted-remote-access.md` |
 | What upstream had that this lacks | `docs/removed-functionality-audit.md` |
 
@@ -60,10 +61,11 @@ These settle most design arguments. Check them before proposing anything.
 
 ## Invariants — do not break these casually
 
-- **The kiosk is read-only.** It may tick today's chores and nothing else.
-  Ticket `N15` narrows this for calendar events only, behind the household PIN.
-  Everything else stays refused. If you find an unhandled write channel for a
-  display, that is usually correct.
+- **The kiosk is read-only, with two carve-outs and no more.** It may tick
+  today's chores (`A04`), and — since `N15` — create, edit and delete calendar
+  events while the household PIN unlock is live. Everything else stays refused
+  by the `default` arm of the display RPC whitelist. If you find an unhandled
+  write channel for a display, that is usually correct.
 - **OpenSkyLight is itself a calendar.** An event authored on the board lives
   there and syncs outward *only* when a person is tagged and that person has a
   linked writable calendar. Staying local is the normal outcome, never an error.
