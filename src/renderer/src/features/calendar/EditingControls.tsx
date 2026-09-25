@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { useAuthMutations, useAuthStatus } from '../../api/hooks'
 import { IconButton } from '../../components/ui'
-import { LockIcon, PlusIcon } from '../../components/icons'
+import { LockIcon, PlusIcon, UnlockIcon } from '../../components/icons'
 import { PinDialog } from '../../components/PinDialog'
 import { isDisplayClient } from '../../lib/clientMode'
 import { useUi } from '../../stores/uiStore'
@@ -33,16 +33,12 @@ export function LockControl() {
   return (
     <>
       {unlocked ? (
-        <button
-          type="button"
-          onClick={() => lock.mutate(undefined)}
-          aria-label="Editing is on. Tap to lock this screen"
-          title="Tap to lock"
-          className="pressable flex min-h-12 shrink-0 items-center gap-2 rounded-full bg-ember px-4 text-sm font-extrabold text-white shadow-card"
-        >
-          <LockIcon size={16} />
-          Editing on
-        </button>
+        // Icon only: the header is already full on a 1280-wide panel, and a
+        // worded chip pushed the view switcher off the edge. The open shackle
+        // and the accent colour say "on"; the label is for screen readers.
+        <IconButton label="Editing is on. Tap to lock this screen" onClick={() => lock.mutate(undefined)} className="bg-ember text-white shadow-card hover:bg-ember">
+          <UnlockIcon size={24} />
+        </IconButton>
       ) : (
         <IconButton label="Unlock editing with the parent PIN" onClick={() => { setError(null); setPrompt(true) }}>
           <LockIcon size={24} />
