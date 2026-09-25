@@ -1,0 +1,12 @@
+team_id: example-team
+objective: >-
+  Replace this with the user objective.
+success:
+  - Observable acceptance criterion 1
+  - Observable acceptance criterion 2
+constraints: []
+risk:
+  architecture: low
+  security: low
+  migration: low
+status: active

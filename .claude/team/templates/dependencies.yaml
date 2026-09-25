@@ -1,0 +1,7 @@
+tasks: {}
+# Example:
+# tasks:
+#   runtime-loader:
+#     depends_on: [package-contract]
+#   integration:
+#     depends_on: [runtime-loader, schema]

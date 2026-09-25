@@ -1,0 +1,12 @@
+id: benchmark-id
+repository_revision: commit-sha
+objective: >-
+  Exact task given to each variant.
+acceptance_criteria: []
+variants:
+  - curator-only
+  - specialist
+  - parallel-specialists
+  - team
+notes: >-
+  Only include variants that make architectural sense for this task.

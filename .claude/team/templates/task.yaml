@@ -1,0 +1,23 @@
+id: task-id
+objective: >-
+  Bounded outcome owned by this worker.
+status: queued
+owner: null
+scope:
+  include: []
+  exclude: []
+inputs: []
+outputs: []
+depends_on: []
+permissions:
+  repository: read
+  shell: read_only
+  network: false
+  secrets: false
+success: []
+stop_when:
+  - success criteria satisfied
+  - blocked by missing decision or dependency
+  - scope must materially expand
+assumptions: []
+artifacts: []

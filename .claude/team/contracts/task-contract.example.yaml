@@ -1,0 +1,48 @@
+id: runtime-loader
+agent_type: implementer
+assignment:
+  title: Dynamic package loader
+  objective: Implement dynamic package discovery and loading.
+
+scope:
+  include:
+    - src/runtime/packages/**
+    - tests/runtime/packages/**
+  exclude:
+    - frontend/**
+    - deployment/**
+
+inputs:
+  - contract: package-manifest-v1
+
+outputs:
+  - implementation
+  - tests
+  - evidence summary
+
+success:
+  - package loads dynamically
+  - existing package behaviour remains compatible
+  - applicable tests pass
+
+permissions:
+  network: false
+  secrets: false
+  production: false
+
+stop_when:
+  - success criteria are satisfied
+  - blocked by a shared contract decision
+  - required scope expands materially
+
+telemetry:
+  assignment_is_stable: true
+  activity_is_mutable: true
+  lifecycle_states:
+    - starting
+    - working
+    - blocked
+    - waiting
+    - completed
+    - failed
+    - cancelled

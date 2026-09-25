@@ -1,0 +1,21 @@
+{
+  "benchmark_id": "benchmark-id",
+  "variant": "curator-only",
+  "completed": true,
+  "acceptance_passed": 0,
+  "acceptance_total": 0,
+  "regressions": 0,
+  "wall_clock_seconds": null,
+  "curator_input_tokens": null,
+  "curator_output_tokens": null,
+  "agent_input_tokens": null,
+  "agent_output_tokens": null,
+  "estimated_cost": null,
+  "agent_invocations": 0,
+  "tool_calls": null,
+  "rework_cycles": 0,
+  "human_interventions": 0,
+  "useful_agent_findings": 0,
+  "false_positive_findings": 0,
+  "notes": ""
+}

@@ -1,0 +1,8 @@
+id: blocker-id
+task: task-id
+summary: >-
+  What prevents useful progress.
+needs: decision | dependency | permission | information
+raised_by: worker-id
+status: open
+resolution: null

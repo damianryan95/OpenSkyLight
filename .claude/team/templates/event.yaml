@@ -1,0 +1,7 @@
+type: FINDING | CONTRACT_CHANGE | BLOCKER | HANDOFF
+from: worker-id
+affects: []
+summary: >-
+  Only information that changes another workstream.
+artifact: null
+action_required: false

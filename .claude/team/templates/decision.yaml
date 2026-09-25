@@ -1,0 +1,7 @@
+id: decision-id
+summary: >-
+  The decision being made.
+status: proposed | accepted | rejected | superseded
+owner: curator
+basis: []
+consequences: []

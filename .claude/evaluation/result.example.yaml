@@ -1,0 +1,10 @@
+task_id: example-001
+mode: direct | specialist | parallel-subagents | team
+objective_pass: true
+latency_seconds: 0
+agent_invocations: 0
+peer_messages: 0
+rework_cycles: 0
+regressions_found_before_completion: 0
+false_positive_findings: 0
+notes: ""
