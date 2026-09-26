@@ -31,33 +31,34 @@ function useNow(): DateTime {
   return now
 }
 
-// Full month name and year throughout, as the Month view and the clock already
-// have; a mix of "Sep 26" here and "September 2026" there read as two products.
+// Full month names throughout, as the clock has; only Month carries the year,
+// where it is the whole point of the label. Mixed "Sep 26" and "September
+// 2026" read as two products.
 function periodLabel(view: CalendarViewKind, focusedDate: string, weekStartsOn: 0 | 1): string {
   const d = DateTime.fromISO(focusedDate, { zone: ZONE })
   if (view === 'home' || view === 'lists') return ''
-  if (view === 'day' || view === 'chores') return d.toFormat('LLLL d, yyyy')
+  if (view === 'day' || view === 'chores') return d.toFormat('LLLL d')
   if (view === 'month') return d.toFormat('LLLL yyyy')
-  if (view === 'agenda') return `From ${d.toFormat('LLLL d, yyyy')}`
+  if (view === 'agenda') return `From ${d.toFormat('LLLL d')}`
   const target = weekStartsOn === 0 ? 7 : 1
   let start = d
   while (start.weekday !== target) start = start.minus({ days: 1 })
   const end = start.plus({ days: 6 })
-  if (start.year !== end.year) return `${start.toFormat('LLLL d, yyyy')} – ${end.toFormat('LLLL d, yyyy')}`
-  if (start.month !== end.month) return `${start.toFormat('LLLL d')} – ${end.toFormat('LLLL d, yyyy')}`
-  return `${start.toFormat('LLLL d')} – ${end.toFormat('d, yyyy')}`
+  return start.month === end.month
+    ? `${start.toFormat('LLLL d')} – ${end.toFormat('d')}`
+    : `${start.toFormat('LLLL d')} – ${end.toFormat('LLLL d')}`
 }
 
 /**
  * The longest strings `periodLabel` can produce for a view. "September" is the
- * longest month name; digits are tabular, so any two-digit day and any year
- * measure the same. A week label is widest when it crosses a month, or a year.
+ * longest month name; digits are tabular, so any two-digit day measures the
+ * same. A week label is widest when it crosses into another month.
  */
 function widestPeriodLabels(view: CalendarViewKind): string[] {
-  if (view === 'day' || view === 'chores') return ['September 30, 2026']
+  if (view === 'day' || view === 'chores') return ['September 30']
   if (view === 'month') return ['September 2026']
-  if (view === 'agenda') return ['From September 30, 2026']
-  if (view === 'week') return ['September 27 – October 3, 2026', 'December 28, 2025 – January 3, 2026']
+  if (view === 'agenda') return ['From September 30']
+  if (view === 'week') return ['September 27 – November 30']
   return []
 }
 
