@@ -31,19 +31,21 @@ function useNow(): DateTime {
   return now
 }
 
+// Full month name and year throughout, as the Month view and the clock already
+// have; a mix of "Sep 26" here and "September 2026" there read as two products.
 function periodLabel(view: CalendarViewKind, focusedDate: string, weekStartsOn: 0 | 1): string {
   const d = DateTime.fromISO(focusedDate, { zone: ZONE })
   if (view === 'home' || view === 'lists') return ''
-  if (view === 'day' || view === 'chores') return d.toFormat('LLL d')
+  if (view === 'day' || view === 'chores') return d.toFormat('LLLL d, yyyy')
   if (view === 'month') return d.toFormat('LLLL yyyy')
-  if (view === 'agenda') return `From ${d.toFormat('LLL d')}`
+  if (view === 'agenda') return `From ${d.toFormat('LLLL d, yyyy')}`
   const target = weekStartsOn === 0 ? 7 : 1
   let start = d
   while (start.weekday !== target) start = start.minus({ days: 1 })
   const end = start.plus({ days: 6 })
-  return start.month === end.month
-    ? `${start.toFormat('LLL d')} – ${end.toFormat('d')}`
-    : `${start.toFormat('LLL d')} – ${end.toFormat('LLL d')}`
+  if (start.year !== end.year) return `${start.toFormat('LLLL d, yyyy')} – ${end.toFormat('LLLL d, yyyy')}`
+  if (start.month !== end.month) return `${start.toFormat('LLLL d')} – ${end.toFormat('LLLL d, yyyy')}`
+  return `${start.toFormat('LLLL d')} – ${end.toFormat('d, yyyy')}`
 }
 
 export function Header() {
