@@ -31,34 +31,33 @@ function useNow(): DateTime {
   return now
 }
 
-// Full month names throughout, as the clock has; only Month carries the year,
-// where it is the whole point of the label. Mixed "Sep 26" and "September
-// 2026" read as two products.
+// Full month names where one month is named; abbreviated where two are, or
+// where "From" already takes the room. Portrait width is what decides this.
 function periodLabel(view: CalendarViewKind, focusedDate: string, weekStartsOn: 0 | 1): string {
   const d = DateTime.fromISO(focusedDate, { zone: ZONE })
   if (view === 'home' || view === 'lists') return ''
   if (view === 'day' || view === 'chores') return d.toFormat('LLLL d')
   if (view === 'month') return d.toFormat('LLLL yyyy')
-  if (view === 'agenda') return `From ${d.toFormat('LLLL d')}`
+  if (view === 'agenda') return `From ${d.toFormat('LLL d')}`
   const target = weekStartsOn === 0 ? 7 : 1
   let start = d
   while (start.weekday !== target) start = start.minus({ days: 1 })
   const end = start.plus({ days: 6 })
   return start.month === end.month
     ? `${start.toFormat('LLLL d')} – ${end.toFormat('d')}`
-    : `${start.toFormat('LLLL d')} – ${end.toFormat('LLLL d')}`
+    : `${start.toFormat('LLL d')} – ${end.toFormat('LLL d')}`
 }
 
 /**
  * The longest strings `periodLabel` can produce for a view. "September" is the
- * longest month name; digits are tabular, so any two-digit day measures the
- * same. A week label is widest when it crosses into another month.
+ * longest month name and "Sept" its longest abbreviation; digits are tabular,
+ * so any two-digit day measures the same.
  */
 function widestPeriodLabels(view: CalendarViewKind): string[] {
   if (view === 'day' || view === 'chores') return ['September 30']
   if (view === 'month') return ['September 2026']
-  if (view === 'agenda') return ['From September 30']
-  if (view === 'week') return ['September 27 – November 30']
+  if (view === 'agenda') return ['From Sept 30']
+  if (view === 'week') return ['September 20 – 26', 'Sept 27 – Oct 30']
   return []
 }
 
