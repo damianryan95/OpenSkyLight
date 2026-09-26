@@ -1,5 +1,6 @@
 import type { AckEventWritesRequest, PendingEventWriteDto, PendingEventWritesResponse } from '@shared/api/contract'
 import { parseRRuleString } from '@shared/recurrence/build'
+import { DateTime } from 'luxon'
 import { parentRequest } from './client'
 import {
   devicePhoneCalendarWriter,
@@ -51,10 +52,25 @@ export function toDeviceRecurrence(rrule: string | null, timezone: string): Devi
   return rule
 }
 
-function toDraft(write: PendingEventWriteDto): DeviceEventDraft | null {
-  const startAt = Date.parse(write.event.startAt)
-  const endAt = Date.parse(write.event.endAt)
+/**
+ * The reverse of the push mapping's all-day rule: the board holds an all-day
+ * event as local midnight in its zone, Android wants midnight UTC on the same
+ * calendar date. Handing Android the board's instant would file a London event
+ * under the day before.
+ */
+export function allDayMillisForDevice(iso: string, zone: string): number {
+  const local = DateTime.fromISO(iso, { zone: 'utc' }).setZone(zone)
+  return Date.UTC(local.year, local.month - 1, local.day)
+}
+
+export function toDraft(write: PendingEventWriteDto): DeviceEventDraft | null {
+  let startAt = Date.parse(write.event.startAt)
+  let endAt = Date.parse(write.event.endAt)
   if (!Number.isFinite(startAt) || !Number.isFinite(endAt)) return null
+  if (write.event.allDay) {
+    startAt = allDayMillisForDevice(write.event.startAt, write.event.timezone)
+    endAt = Math.max(allDayMillisForDevice(write.event.endAt, write.event.timezone), startAt + 86_400_000)
+  }
   return {
     calendarId: write.sourceCalendarId,
     title: write.event.title,

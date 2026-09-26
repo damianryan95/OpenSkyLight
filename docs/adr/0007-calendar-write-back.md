@@ -116,6 +116,18 @@ A person whose only linked calendar is read-only is therefore treated exactly
 like a person with no linked calendar: the event stays local, silently and
 correctly. This is the normal outcome and never an error.
 
+### All-day events are local midnight, end exclusive
+
+On the board an all-day event runs from midnight in its own timezone to
+midnight on the day after it ends. iCal `DATE` values and the wall's editor
+already produce this. Android does not: it stores an all-day event as midnight
+**UTC** to midnight UTC and labels it `UTC`, whatever zone the household is in.
+Pushed as-is, a London all-day event began at 01:00 and touched two days. The
+phone therefore converts at the boundary in both directions — the calendar date
+is read off the UTC instant and placed at local midnight on the way in, and
+turned back into midnight UTC on the way out — so nothing downstream needs to
+know which source an all-day event came from.
+
 ## Consequences
 
 - The kiosk stops being wholly read-only. `K03` is narrowed a second time, for

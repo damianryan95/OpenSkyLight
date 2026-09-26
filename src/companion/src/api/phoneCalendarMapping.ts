@@ -1,4 +1,5 @@
 import type { PhoneEventDto, PushPhoneCalendarsRequest } from '@shared/api/contract'
+import { DateTime } from 'luxon'
 
 /**
  * Everything about turning this phone's calendar store into a push payload,
@@ -136,6 +137,19 @@ function timezoneOf(event: DeviceEvent, deviceTimezone: string): string {
 }
 
 /**
+ * Android keeps an all-day event as midnight UTC on its date to midnight UTC on
+ * the day after, whatever timezone the household is in - and it labels the event
+ * "UTC" for good measure. The board, iCal feeds and the wall's own editor all
+ * mean midnight in the household's zone, so pushed as-is the event began at
+ * 01:00 in London and touched two days. Read the calendar date off the UTC
+ * instant and place it at local midnight instead.
+ */
+export function allDayInstantFromDevice(millis: number, zone: string): string {
+  const utc = DateTime.fromMillis(millis, { zone: 'utc' })
+  return DateTime.fromObject({ year: utc.year, month: utc.month, day: utc.day }, { zone }).startOf('day').toUTC().toISO()!
+}
+
+/**
  * One device occurrence as the contract wants it, or null when it cannot be
  * represented at all — an event with no usable start has nowhere to sit on a
  * board organised entirely by time.
@@ -153,18 +167,27 @@ export function toPhoneEvent(event: DeviceEvent, deviceTimezone: string): PhoneE
   if (sourceEventId.length > 512) return null
   const endAt = isoOrNull(event.endDate) ?? startAt
   const icalUid = trimmed(event.calendarItemExternalIdentifier, 512)
+  const allDay = event.isAllDay === true
+  // Android's "UTC" on an all-day event is a storage convention, not where the
+  // household lives; the phone's own zone is the honest answer.
+  const timezone = allDay ? timezoneOf({ ...event, timezone: null }, deviceTimezone) : timezoneOf(event, deviceTimezone)
+  const times = allDay
+    ? allDayTimes(event.startDate, event.endDate, timezone)
+    : {
+        startAt,
+        // An end before its start is a provider glitch; a zero-length event is
+        // still renderable, an inverted one is not.
+        endAt: Date.parse(endAt) < Date.parse(startAt) ? startAt : endAt
+      }
   return {
     sourceEventId,
     icalUid,
     title: trimmed(event.title, 1000) ?? '',
     description: trimmed(event.description, 20_000),
     location: trimmed(event.location, 1000),
-    startAt,
-    // An end before its start is a provider glitch; a zero-length event is
-    // still renderable, an inverted one is not.
-    endAt: Date.parse(endAt) < Date.parse(startAt) ? startAt : endAt,
-    timezone: timezoneOf(event, deviceTimezone),
-    allDay: event.isAllDay === true,
+    ...times,
+    timezone,
+    allDay,
     recurrence: null,
     recurrenceExdates: null,
     recurrenceRdates: null,
@@ -173,6 +196,18 @@ export function toPhoneEvent(event: DeviceEvent, deviceTimezone: string): PhoneE
     status: statusOf(event.status),
     remoteUpdatedAt: isoOrNull(event.lastModifiedDate)
   }
+}
+
+function allDayTimes(startMillis: number, endMillis: number | null | undefined, zone: string): { startAt: string; endAt: string } {
+  const startAt = allDayInstantFromDevice(startMillis, zone)
+  const start = DateTime.fromISO(startAt, { zone: 'utc' })
+  const endCandidate = typeof endMillis === 'number' && Number.isFinite(endMillis) ? allDayInstantFromDevice(endMillis, zone) : null
+  // The end is exclusive, so a one-day event ends at the next midnight. A
+  // missing or inverted end is the same provider glitch as for timed events.
+  const endAt = endCandidate !== null && DateTime.fromISO(endCandidate, { zone: 'utc' }) > start
+    ? endCandidate
+    : start.plus({ days: 1 }).toISO()!
+  return { startAt, endAt }
 }
 
 export function calendarDisplayName(calendar: DeviceCalendar): string {

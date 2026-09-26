@@ -68,6 +68,33 @@ describe('mapping a phone occurrence to the push contract', () => {
     expect(mapped.recurrenceRdates).toBeNull()
   })
 
+  it('places an all-day event at local midnight on its date, not at the UTC midnight Android stores', () => {
+    // 26 Sep 2026, all day, as Android keeps it: 00:00Z to 00:00Z next day, labelled UTC.
+    const mapped = toPhoneEvent(event({
+      id: '1', startDate: Date.UTC(2026, 8, 26), endDate: Date.UTC(2026, 8, 27), isAllDay: true, timezone: 'UTC'
+    }), 'Europe/London')!
+    expect(mapped.allDay).toBe(true)
+    expect(mapped.timezone).toBe('Europe/London')
+    // Midnight in London during BST is 23:00Z the evening before.
+    expect(mapped.startAt).toBe('2026-09-25T23:00:00.000Z')
+    expect(mapped.endAt).toBe('2026-09-26T23:00:00.000Z')
+  })
+
+  it('keeps an all-day event on the right date west of Greenwich too', () => {
+    const mapped = toPhoneEvent(event({
+      id: '1', startDate: Date.UTC(2026, 8, 26), endDate: Date.UTC(2026, 8, 28), isAllDay: true, timezone: 'UTC'
+    }), 'America/New_York')!
+    expect(mapped.startAt).toBe('2026-09-26T04:00:00.000Z')
+    expect(mapped.endAt).toBe('2026-09-28T04:00:00.000Z')
+  })
+
+  it('gives an all-day event with no end, or an inverted one, a single day', () => {
+    const one = toPhoneEvent(event({ id: '1', startDate: Date.UTC(2026, 8, 26), endDate: null, isAllDay: true }), 'Europe/London')!
+    expect(one.endAt).toBe('2026-09-26T23:00:00.000Z')
+    const inverted = toPhoneEvent(event({ id: '1', startDate: Date.UTC(2026, 8, 26), endDate: Date.UTC(2026, 8, 20), isAllDay: true }), 'Europe/London')!
+    expect(inverted.endAt).toBe('2026-09-26T23:00:00.000Z')
+  })
+
   it('uses the device timezone when the event carries none, as Android often does', () => {
     expect(toPhoneEvent(event({ id: '1', startDate: 1_700_000_000_000, timezone: null }), TZ)!.timezone).toBe(TZ)
     expect(toPhoneEvent(event({ id: '1', startDate: 1_700_000_000_000, timezone: '  ' }), TZ)!.timezone).toBe(TZ)

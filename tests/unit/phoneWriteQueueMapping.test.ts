@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
-import { toDeviceRecurrence } from '../../src/companion/src/api/phoneWriteQueue'
+import type { PendingEventWriteDto } from '../../src/shared/api/contract'
+import { allDayMillisForDevice, toDeviceRecurrence, toDraft } from '../../src/companion/src/api/phoneWriteQueue'
 import { buildRRuleString } from '../../src/shared/recurrence/build'
 
 /**
@@ -41,5 +42,44 @@ describe('RRULE to the phone plugin’s recurrence rule', () => {
     expect(toDeviceRecurrence(null, 'Europe/London')).toBeNull()
     // A positional BYDAY ("the second Monday") is not modelled by either side.
     expect(toDeviceRecurrence('FREQ=MONTHLY;BYDAY=2MO', 'Europe/London')).toBeNull()
+  })
+})
+
+describe('an all-day board event handed to the phone', () => {
+  it('lands on midnight UTC of its calendar date, as Android expects', () => {
+    // The board's all-day 26 Sep in London is 23:00Z on the 25th; Android wants 00:00Z on the 26th.
+    expect(allDayMillisForDevice('2026-09-25T23:00:00.000Z', 'Europe/London')).toBe(Date.UTC(2026, 8, 26))
+    expect(allDayMillisForDevice('2026-09-26T04:00:00.000Z', 'America/New_York')).toBe(Date.UTC(2026, 8, 26))
+  })
+
+  it('converts both ends of the draft and never hands Android a zero-length all-day event', () => {
+    const write = {
+      id: 'w1', sourceCalendarId: 'cal', op: 'create', mirrorKey: null, etag: null,
+      event: {
+        id: 'e1', title: 'Sports day', description: null, location: null,
+        startAt: '2026-09-25T23:00:00.000Z', endAt: '2026-09-26T23:00:00.000Z',
+        timezone: 'Europe/London', allDay: true, recurrence: null, originalStartAt: null
+      }
+    } as unknown as PendingEventWriteDto
+    const draft = toDraft(write)!
+    expect(draft.allDay).toBe(true)
+    expect(draft.startAt).toBe(Date.UTC(2026, 8, 26))
+    expect(draft.endAt).toBe(Date.UTC(2026, 8, 27))
+    const zero = toDraft({ ...write, event: { ...write.event, endAt: write.event.startAt } } as PendingEventWriteDto)!
+    expect(zero.endAt).toBe(Date.UTC(2026, 8, 27))
+  })
+
+  it('leaves a timed event exactly where the board put it', () => {
+    const write = {
+      id: 'w2', sourceCalendarId: 'cal', op: 'create', mirrorKey: null, etag: null,
+      event: {
+        id: 'e2', title: 'Dentist', description: null, location: null,
+        startAt: '2026-09-26T09:30:00.000Z', endAt: '2026-09-26T10:00:00.000Z',
+        timezone: 'Europe/London', allDay: false, recurrence: null, originalStartAt: null
+      }
+    } as unknown as PendingEventWriteDto
+    const draft = toDraft(write)!
+    expect(draft.startAt).toBe(Date.parse('2026-09-26T09:30:00.000Z'))
+    expect(draft.endAt).toBe(Date.parse('2026-09-26T10:00:00.000Z'))
   })
 })
