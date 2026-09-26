@@ -144,6 +144,12 @@ export function ChoresView() {
         <BigButton variant="ghost" onClick={() => setRewardsOpen(true)}>
           ★ Rewards
         </BigButton>
+        {/* Opens the chores and rewards editor. On a display the settings sheet
+            asks for the parent PIN first, or opens straight in if the header
+            lock is already open. */}
+        <BigButton variant="ghost" onClick={() => setSettingsOpen(true)}>
+          Manage
+        </BigButton>
       </div>
 
       {columns.length === 0 ? (
@@ -152,9 +158,9 @@ export function ChoresView() {
           <p className="max-w-md text-base font-semibold text-ink-soft">
             Parents can set up routines and chores in Settings → Chores.
           </p>
-          {!display && <BigButton variant="ghost" onClick={() => setSettingsOpen(true)}>
-            Open settings
-          </BigButton>}
+          <BigButton variant="ghost" onClick={() => setSettingsOpen(true)}>
+            Set up chores
+          </BigButton>
         </div>
       ) : (
         <div className="flex min-h-0 flex-1 justify-center gap-4 overflow-x-auto">

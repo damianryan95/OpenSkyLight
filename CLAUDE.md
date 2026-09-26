@@ -61,11 +61,13 @@ These settle most design arguments. Check them before proposing anything.
 
 ## Invariants — do not break these casually
 
-- **The kiosk is read-only, with two carve-outs and no more.** It may tick
-  today's chores (`A04`), and — since `N15` — create, edit and delete calendar
-  events while the household PIN unlock is live. Everything else stays refused
-  by the `default` arm of the display RPC whitelist. If you find an unhandled
-  write channel for a display, that is usually correct.
+- **The kiosk is read-only, with named carve-outs and no more.** It may tick
+  today's chores (`A04`); run **lists** freely, structure included (`N20`); and,
+  while the household PIN unlock is live, edit **calendar events** (`N15`) and
+  administer **chores and rewards** (`N20`). Everything else stays refused by
+  the `default` arm of the display RPC whitelist — people, calendars, meals,
+  redeeming a reward, household settings. If you find an unhandled write
+  channel for a display, that is usually correct; `K03` lists what still holds.
 - **OpenSkyLight is itself a calendar.** An event authored on the board lives
   there and syncs outward *only* when a person is tagged and that person has a
   linked writable calendar. Staying local is the normal outcome, never an error.

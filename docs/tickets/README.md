@@ -159,6 +159,7 @@ Product and technical direction: [`phone-first-roadmap.md`](../phone-first-roadm
 - [N17 - Parent app pairing and token authentication](N17-parent-app-pairing.md)
 - [N18 - Screen-displayed QR enrolment and household claim](N18-screen-qr-enrolment.md)
 - [N19 - iOS app platform and verification](N19-ios-app-platform.md)
+- [N20 - On-screen chores, rewards and lists editing](N20-on-screen-chores-lists-editing.md)
 
 `N01`, `N13` and `N14` are done; `N17` is done and gates both `N05` and
 `N18`. **`N05` is Android-only**; iOS is `N19`, which is `blocked` on a Mac and

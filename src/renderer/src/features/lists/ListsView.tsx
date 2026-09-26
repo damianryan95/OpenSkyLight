@@ -6,7 +6,6 @@ import { BigButton, Dialog, FieldLabel, SegmentedControl } from '../../component
 import { OskInput } from '../../components/Osk'
 import { CheckIcon, PlusIcon, XIcon } from '../../components/icons'
 import { textOn } from '../../lib/format'
-import { isDisplayClient } from '../../lib/clientMode'
 
 function AddItemRow({ listId }: { listId: string }) {
   const [text, setText] = useState('')
@@ -99,7 +98,10 @@ export function ListsView() {
   const [name, setName] = useState('')
   const [color, setColor] = useState<string>(PERSON_COLORS[4])
   const [kind, setKind] = useState<ListKind>('grocery')
-  const readOnly = isDisplayClient()
+  // Lists are open on the wall for everyone, structure included (owner's
+  // direction, 2026-09-26; `N20`). The server whitelists the same channels
+  // without a PIN, so this is a presentation choice, not the boundary.
+  const readOnly = false
 
   const openEditor = (l: ListDto | 'new'): void => {
     setEditing(l)

@@ -109,18 +109,17 @@ describe('display registration and capabilities', () => {
     }
     const credential = displays.register({ name: 'Kitchen' }).credential
     const headers = { authorization: `Bearer ${credential}`, 'content-type': 'application/json' }
-    // K03's remaining guarantees, narrowed twice now (by N06 and N15) and still
-    // absolute for everything listed here. These stay refused whether or not the
-    // parent PIN unlock is live — only calendar events and today's chores were
-    // ever carved out, and the carve-out is asserted separately below.
+    // K03's remaining guarantees, narrowed three times now (N06, N15, N20) and
+    // still absolute for everything listed here. These stay refused whether or
+    // not the parent PIN unlock is live. What was carved out - today's chore
+    // tick, calendar events, chore and reward administration behind the PIN,
+    // and lists entirely - is asserted separately below.
     const forbiddenMutations = [
       'app:installUpdate',
       'people:create', 'people:update', 'people:delete',
       'calendars:create', 'calendars:update', 'calendars:delete',
       'google:setCredentials', 'google:connect', 'google:disconnect', 'google:setCalendarSelected', 'ics:add', 'sync:now',
-      'chores:create', 'chores:update', 'chores:delete',
-      'rewards:create', 'rewards:update', 'rewards:delete', 'rewards:redeem', 'rewards:grant',
-      'lists:create', 'lists:update', 'lists:delete', 'listItems:add', 'listItems:toggle', 'listItems:delete', 'listItems:clearChecked',
+      'rewards:redeem',
       'meals:set', 'screensaver:pickFolder', 'kiosk:previewScreensaver',
       'companion:issueToken', 'companion:unpairAll', 'auth:setPin'
     ]
@@ -235,6 +234,105 @@ describe('display registration and capabilities', () => {
     } finally {
       vi.useRealTimers()
     }
+    db.close()
+  })
+
+  /**
+   * `N20`: lists are open to anyone at the wall, structure included, by the
+   * owner's decision; chores and rewards administration sits behind the same
+   * PIN window as calendar editing. Both halves stated here so the boundary is
+   * visible rather than implied by an absence from the refused list.
+   */
+  it('lets anyone at the wall run the lists, with no PIN at all', async () => {
+    const db = database()
+    const auth = new HouseholdAuthService(db.sqlite)
+    const displays = new DisplayDeviceService(db.sqlite)
+    const settings = createHouseholdSettingsService(db.sqlite)
+    const chores = createChoresRewardsService(db.sqlite)
+    const dependencies = {
+      auth, displays, parentDevices: new ParentDeviceService(db.sqlite), settings, chores,
+      people: createPeopleService(db.sqlite), lists: createListsDomain(db.sqlite), meals: createMealsDomain(db.sqlite),
+      displayRead: createDisplayReadService(db.sqlite, chores)
+    }
+    const credential = displays.register({ name: 'Kitchen' }).credential
+    const headers = { authorization: `Bearer ${credential}`, 'content-type': 'application/json' }
+    auth.setup('1234')
+    // Locked throughout: nobody has entered a PIN on this display.
+
+    const created = await call('POST', '/api/rpc/lists%3Acreate', headers, { name: 'Shopping', color: '#0af', kind: 'grocery' }, dependencies)
+    expect(created.status).toBe(200)
+    const listId = (JSON.parse(created.body) as { data: { id: string } }).data.id
+    const added = await call('POST', '/api/rpc/listItems%3Aadd', headers, { listId, text: 'Milk' }, dependencies)
+    expect(added.status).toBe(200)
+    const itemId = (JSON.parse(added.body) as { data: { id: string } }).data.id
+    expect((await call('POST', '/api/rpc/listItems%3Atoggle', headers, { id: itemId }, dependencies)).status).toBe(200)
+    expect((await call('POST', '/api/rpc/lists%3Aupdate', headers, { id: listId, name: 'Groceries' }, dependencies)).status).toBe(200)
+    const lists = JSON.parse((await call('POST', '/api/rpc/lists%3AgetAll', headers, {}, dependencies)).body) as { data: { name: string; items: { text: string; checked: boolean }[] }[] }
+    expect(lists.data).toEqual([expect.objectContaining({ name: 'Groceries', items: [expect.objectContaining({ text: 'Milk', checked: true })] })])
+    expect((await call('POST', '/api/rpc/listItems%3AclearChecked', headers, { listId }, dependencies)).status).toBe(200)
+    expect((await call('POST', '/api/rpc/lists%3Adelete', headers, { id: listId }, dependencies)).status).toBe(200)
+    db.close()
+  })
+
+  it('puts chore and reward administration behind the PIN, and hands the schedule back intact', async () => {
+    const db = database()
+    const auth = new HouseholdAuthService(db.sqlite)
+    const displays = new DisplayDeviceService(db.sqlite)
+    const settings = createHouseholdSettingsService(db.sqlite)
+    settings.setTimezone('Europe/London')
+    const chores = createChoresRewardsService(db.sqlite)
+    const people = createPeopleService(db.sqlite)
+    const ava = people.create({ name: 'Ava', color: '#f06', role: 'child' })
+    const dependencies = {
+      auth, displays, parentDevices: new ParentDeviceService(db.sqlite), settings, chores, people,
+      lists: createListsDomain(db.sqlite), meals: createMealsDomain(db.sqlite),
+      displayRead: createDisplayReadService(db.sqlite, chores, settings)
+    }
+    const credential = displays.register({ name: 'Kitchen' }).credential
+    const headers = { authorization: `Bearer ${credential}`, 'content-type': 'application/json' }
+    auth.setup('1234')
+    const weekly = { title: 'Feed the cat', personId: ava.id, starsValue: 2, recurrence: { freq: 'weekly', byWeekdays: [0, 2, 4] }, routine: 'morning' }
+
+    // Locked: refused, every one of them, and a reward request cannot be granted.
+    for (const [channel, body] of [
+      ['chores:create', weekly], ['chores:update', { id: 'x', title: 'y' }], ['chores:delete', { id: 'x' }],
+      ['rewards:create', { title: 'Film night', costStars: 10 }], ['rewards:update', { id: 'x', title: 'y' }], ['rewards:delete', { id: 'x' }], ['rewards:grant', { redemptionId: 'x' }]
+    ] as [string, unknown][]) {
+      expect((await call('POST', `/api/rpc/${encodeURIComponent(channel)}`, headers, body, dependencies)).status, channel).toBe(403)
+    }
+    // Reading pending requests never needed a gate.
+    expect((await call('POST', '/api/rpc/rewards%3Aredemptions', headers, {}, dependencies)).status).toBe(200)
+
+    expect((await call('POST', '/api/rpc/auth%3AverifyPin', headers, { pin: '1234' }, dependencies)).status).toBe(200)
+
+    const created = await call('POST', '/api/rpc/chores%3Acreate', headers, weekly, dependencies)
+    expect(created.status).toBe(200)
+    const chore = (JSON.parse(created.body) as { data: { id: string; recurrence: unknown; routine: string } }).data
+    // The schedule round-trips through the RRULE the service stores. Before N20
+    // the display read reported every chore as a one-off, which an editor on
+    // the wall would have saved back, wiping the schedule.
+    expect(chore.recurrence).toEqual({ freq: 'weekly', byWeekdays: [0, 2, 4] })
+    expect(chore.routine).toBe('morning')
+    const listed = JSON.parse((await call('POST', '/api/rpc/chores%3Alist', headers, {}, dependencies)).body) as { data: { id: string; recurrence: unknown }[] }
+    expect(listed.data.find((c) => c.id === chore.id)?.recurrence).toEqual({ freq: 'weekly', byWeekdays: [0, 2, 4] })
+
+    // An update that says nothing about the schedule leaves it alone.
+    const renamed = await call('POST', '/api/rpc/chores%3Aupdate', headers, { id: chore.id, title: 'Feed the cats' }, dependencies)
+    expect((JSON.parse(renamed.body) as { data: { recurrence: unknown } }).data.recurrence).toEqual({ freq: 'weekly', byWeekdays: [0, 2, 4] })
+    // And one that says null makes it a one-off.
+    const once = await call('POST', '/api/rpc/chores%3Aupdate', headers, { id: chore.id, recurrence: null }, dependencies)
+    expect((JSON.parse(once.body) as { data: { recurrence: unknown } }).data.recurrence).toBeNull()
+
+    const reward = await call('POST', '/api/rpc/rewards%3Acreate', headers, { title: 'Film night', costStars: 10 }, dependencies)
+    expect(reward.status).toBe(200)
+    const rewardId = (JSON.parse(reward.body) as { data: { id: string } }).data.id
+    expect((await call('POST', '/api/rpc/rewards%3Aupdate', headers, { id: rewardId, costStars: 12 }, dependencies)).status).toBe(200)
+    expect((await call('POST', '/api/rpc/rewards%3Adelete', headers, { id: rewardId }, dependencies)).status).toBe(200)
+    expect((await call('POST', '/api/rpc/chores%3Adelete', headers, { id: chore.id }, dependencies)).status).toBe(200)
+
+    // What is not carved out stays refused with the window open.
+    expect((await call('POST', '/api/rpc/rewards%3Aredeem', headers, { rewardId, personId: ava.id }, dependencies)).status).toBe(403)
+    expect((await call('POST', '/api/rpc/people%3Acreate', headers, { name: 'x', color: '#000', role: 'child' }, dependencies)).status).toBe(403)
     db.close()
   })
 })

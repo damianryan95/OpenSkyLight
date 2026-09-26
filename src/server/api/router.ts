@@ -1,7 +1,7 @@
 import type { IncomingMessage, ServerResponse } from 'node:http'
 import { z } from 'zod'
 import { DateTime } from 'luxon'
-import { ackEventWritesRequestSchema, ackEventWritesResponseSchema, addListItemRequestSchema, authoredEventSchema, claimHouseholdRequestSchema, eventDraftSchema, eventScopeSchema, updateEventRequestSchema, apiContract, apiInfoResponseSchema, choreCorrectionRequestSchema, claimEnrolmentRequestSchema, claimEnrolmentResponseSchema, connectCalDavRequestSchema, connectIcsRequestSchema, connectPhoneRequestSchema, displayDeviceSchema, enrolDisplayRequestSchema, enrolmentCodeSchema, pendingEventWritesResponseSchema, pushPhoneCalendarsConflictSchema, pushPhoneCalendarsRequestSchema, pushPhoneCalendarsResponseSchema, setCalendarSelectionRequestSchema, createChoreRequestSchema, createListRequestSchema, createPersonRequestSchema, createRewardRequestSchema, displayChoreCommandRequestSchema, mealRangeRequestSchema, mealSlotKindSchema, pairParentDeviceRequestSchema, redeemRewardRequestSchema, registerDisplayRequestSchema, setMealRequestSchema, setMealTemplateRequestSchema, starAdjustmentRequestSchema, updateChoreRequestSchema, updateDisplayRequestSchema, updateHouseholdSettingsRequestSchema, updateListRequestSchema, updatePersonRequestSchema, updateRewardRequestSchema } from '../../shared/api/contract'
+import { ackEventWritesRequestSchema, ackEventWritesResponseSchema, addListItemRequestSchema, authoredEventSchema, claimHouseholdRequestSchema, listKindSchema, eventDraftSchema, eventScopeSchema, updateEventRequestSchema, apiContract, apiInfoResponseSchema, choreCorrectionRequestSchema, claimEnrolmentRequestSchema, claimEnrolmentResponseSchema, connectCalDavRequestSchema, connectIcsRequestSchema, connectPhoneRequestSchema, displayDeviceSchema, enrolDisplayRequestSchema, enrolmentCodeSchema, pendingEventWritesResponseSchema, pushPhoneCalendarsConflictSchema, pushPhoneCalendarsRequestSchema, pushPhoneCalendarsResponseSchema, setCalendarSelectionRequestSchema, createChoreRequestSchema, createListRequestSchema, createPersonRequestSchema, createRewardRequestSchema, displayChoreCommandRequestSchema, mealRangeRequestSchema, mealSlotKindSchema, pairParentDeviceRequestSchema, redeemRewardRequestSchema, registerDisplayRequestSchema, setMealRequestSchema, setMealTemplateRequestSchema, starAdjustmentRequestSchema, updateChoreRequestSchema, updateDisplayRequestSchema, updateHouseholdSettingsRequestSchema, updateListRequestSchema, updatePersonRequestSchema, updateRewardRequestSchema } from '../../shared/api/contract'
 import { AuthError, CSRF_HEADER, DisplayDeviceService, DisplayEnrolmentService, HouseholdAuthService, ParentDeviceService, PARENT_SESSION_COOKIE } from '../auth'
 import { type ChoresRewardsService, type DisplayReadService, type HouseholdSettingsService, type ListsDomain, type MealsDomain, type PeopleService, type MediaService } from '../domain'
 import { createReadStream } from 'node:fs'
@@ -12,6 +12,7 @@ import type { SyncScheduler } from '../sync/scheduler'
 import type { OnlineIconSearchService } from '../icons'
 import type { RssService } from '../domain/rss'
 import type { EventAuthoringService } from '../domain/events'
+import { buildRRuleString } from '../../shared/recurrence/build'
 import type { PhoneWriteService } from '../sync/phoneWrites'
 import { ApiRequestError, readBinaryBody, readJsonBody, sendApiError, sendJson, validateApiInput } from './http'
 
@@ -850,6 +851,118 @@ async function handleDisplayReadRpc(
     case 'stars:balances': return read.balances()
     case 'rewards:list': return read.rewards()
     case 'lists:getAll': return dependencies.lists.queries.getAll()
+    // Lists are fully open on the wall, no PIN and no window (owner's direction,
+    // 2026-09-26; `N20`). A shopping list nobody standing at it can add to is
+    // not a shopping list. K03 records this as its third narrowing.
+    case 'lists:create': {
+      const input = await readJsonBody(request, z.object({ name: z.string().trim().min(1).max(120), color: z.string().min(1).max(40), kind: listKindSchema }).strict())
+      const list = dependencies.lists.parentCommands.create(input)
+      publishInvalidation(dependencies, ['lists'])
+      return list
+    }
+    case 'lists:update': {
+      const input = await readJsonBody(request, z.object({ id: z.string().min(1), name: z.string().trim().min(1).max(120).optional(), color: z.string().min(1).max(40).optional() }).strict())
+      const list = dependencies.lists.parentCommands.update(input)
+      publishInvalidation(dependencies, ['lists'])
+      return list
+    }
+    case 'lists:delete': {
+      const { id } = await readJsonBody(request, z.object({ id: z.string().min(1) }).strict())
+      dependencies.lists.parentCommands.remove(id)
+      publishInvalidation(dependencies, ['lists'])
+      return undefined
+    }
+    case 'listItems:add': {
+      const { listId, text } = await readJsonBody(request, z.object({ listId: z.string().min(1), text: z.string().trim().min(1).max(500) }).strict())
+      const item = dependencies.lists.parentCommands.addItem(listId, text)
+      publishInvalidation(dependencies, ['lists'])
+      return item
+    }
+    case 'listItems:toggle': {
+      const { id } = await readJsonBody(request, z.object({ id: z.string().min(1) }).strict())
+      dependencies.lists.parentCommands.toggleItem(id)
+      publishInvalidation(dependencies, ['lists'])
+      return undefined
+    }
+    case 'listItems:delete': {
+      const { id } = await readJsonBody(request, z.object({ id: z.string().min(1) }).strict())
+      dependencies.lists.parentCommands.removeItem(id)
+      publishInvalidation(dependencies, ['lists'])
+      return undefined
+    }
+    case 'listItems:clearChecked': {
+      const { listId } = await readJsonBody(request, z.object({ listId: z.string().min(1) }).strict())
+      dependencies.lists.parentCommands.clearChecked(listId)
+      publishInvalidation(dependencies, ['lists'])
+      return undefined
+    }
+    // Chore and reward administration from the wall (`N20`), behind the same
+    // PIN window as calendar editing. The kiosk editor speaks the legacy
+    // recurrence model, so it is translated to the RRULE the chores service
+    // stores; the read side translates back in `choreDefinitions`.
+    case 'chores:create': {
+      requireDisplayEditWindow(device)
+      const input = await readJsonBody(request, displayChoreCreateSchema)
+      const timezone = dependencies.settings.get().timezone
+      const id = dependencies.chores.createChore({
+        title: input.title, icon: input.icon ?? null, personId: input.personId, starsValue: input.starsValue,
+        dueDate: input.anchorDate ?? currentHouseholdDate(dependencies.settings, dependencies.now),
+        scheduleRrule: input.recurrence == null ? null : buildRRuleString(input.recurrence, timezone),
+        routine: input.routine ?? null
+      })
+      publishInvalidation(dependencies, ['chores'])
+      return read.choreDefinitions().find((chore) => chore.id === id)
+    }
+    case 'chores:update': {
+      requireDisplayEditWindow(device)
+      const input = await readJsonBody(request, displayChoreUpdateSchema)
+      const timezone = dependencies.settings.get().timezone
+      dependencies.chores.updateChore({
+        id: input.id, title: input.title, icon: input.icon, personId: input.personId, starsValue: input.starsValue,
+        dueDate: input.anchorDate, routine: input.routine, active: input.active,
+        // undefined leaves the schedule alone; null clears it; a rule replaces it.
+        scheduleRrule: input.recurrence === undefined ? undefined : input.recurrence === null ? null : buildRRuleString(input.recurrence, timezone)
+      })
+      publishInvalidation(dependencies, ['chores'])
+      return read.choreDefinitions().find((chore) => chore.id === input.id)
+    }
+    case 'chores:delete': {
+      requireDisplayEditWindow(device)
+      const { id } = await readJsonBody(request, z.object({ id: z.string().min(1) }).strict())
+      dependencies.chores.archiveChore(id)
+      publishInvalidation(dependencies, ['chores'])
+      return undefined
+    }
+    // A read: what the reward editor shows as pending requests.
+    case 'rewards:redemptions': return dependencies.chores.listRedemptions()
+    case 'rewards:create': {
+      requireDisplayEditWindow(device)
+      const input = await readJsonBody(request, z.object({ title: z.string().trim().min(1).max(120), costStars: z.number().int().positive(), icon: z.string().max(45_000).nullable().optional() }).strict())
+      const id = dependencies.chores.createReward({ title: input.title, costStars: input.costStars, icon: input.icon ?? null })
+      publishInvalidation(dependencies, ['rewards'])
+      return read.rewards().find((reward) => reward.id === id)
+    }
+    case 'rewards:update': {
+      requireDisplayEditWindow(device)
+      const input = await readJsonBody(request, z.object({ id: z.string().min(1), title: z.string().trim().min(1).max(120).optional(), costStars: z.number().int().positive().optional(), active: z.boolean().optional(), icon: z.string().max(45_000).nullable().optional() }).strict())
+      dependencies.chores.updateReward(input)
+      publishInvalidation(dependencies, ['rewards'])
+      return read.rewards().find((reward) => reward.id === input.id)
+    }
+    case 'rewards:delete': {
+      requireDisplayEditWindow(device)
+      const { id } = await readJsonBody(request, z.object({ id: z.string().min(1) }).strict())
+      dependencies.chores.archiveReward(id)
+      publishInvalidation(dependencies, ['rewards'])
+      return undefined
+    }
+    case 'rewards:grant': {
+      requireDisplayEditWindow(device)
+      const { redemptionId } = await readJsonBody(request, z.object({ redemptionId: z.string().min(1) }).strict())
+      dependencies.chores.grantRedemption(redemptionId)
+      publishInvalidation(dependencies, ['rewards'])
+      return undefined
+    }
     case 'meals:getRange': {
       const input = await readJsonBody(request, z.object({ start: z.string().regex(/^\d{4}-\d{2}-\d{2}$/), end: z.string().regex(/^\d{4}-\d{2}-\d{2}$/) }).strict())
       return dependencies.meals.queries.getRange(input.start, input.end)
@@ -908,6 +1021,28 @@ function requireDisplayEditWindow(device: { id: string }): void {
     throw new AuthError(403, 'forbidden', 'Enter the parent PIN before changing the calendar on this display')
   }
 }
+
+/** The kiosk editor's simplified recurrence model, exactly as `RecurrenceInput`
+ * in shared/types. Translated to an RRULE at the boundary. */
+const displayRecurrenceSchema = z.object({
+  freq: z.enum(['daily', 'weekly', 'monthly', 'yearly']),
+  interval: z.number().int().positive().optional(),
+  byWeekdays: z.array(z.number().int().min(0).max(6)).max(7).optional(),
+  untilDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
+  count: z.number().int().positive().optional()
+}).strict()
+const displayRoutineSchema = z.enum(['morning', 'evening']).nullable()
+const displayChoreCreateSchema = z.object({
+  title: z.string().trim().min(1).max(120),
+  icon: z.string().max(45_000).nullable().optional(),
+  personId: z.string().min(1),
+  starsValue: z.number().int().min(0).max(1000),
+  recurrence: displayRecurrenceSchema.nullable().optional(),
+  anchorDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
+  routine: displayRoutineSchema.optional()
+}).strict()
+const displayChoreUpdateSchema = displayChoreCreateSchema.partial().extend({ id: z.string().min(1), active: z.boolean().optional() }).strict()
+  .refine((value) => Object.keys(value).length > 1, { message: 'At least one chore field is required' })
 
 /** A display names the occurrence it means in the body; there is no query string
  * on an RPC channel. Otherwise identical to the parent route's rules. */

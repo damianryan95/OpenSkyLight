@@ -30,6 +30,7 @@ import { BigButton, Dialog, FieldLabel, SegmentedControl, Sheet, Toggle } from '
 import { OskInput } from '../../components/Osk'
 import { PlusIcon } from '../../components/icons'
 import { initials, textOn } from '../../lib/format'
+import { isDisplayClient } from '../../lib/clientMode'
 import QRCode from 'qrcode'
 
 type Tab = 'family' | 'calendars' | 'chores' | 'general'
@@ -37,7 +38,12 @@ type Tab = 'family' | 'calendars' | 'chores' | 'general'
 export function SettingsSheet() {
   const open = useUi((s) => s.settingsOpen)
   const setOpen = useUi((s) => s.setSettingsOpen)
-  const [tab, setTab] = useState<Tab>('family')
+  // A wall display gets one tab: chores and rewards (`N20`). Family, calendars
+  // and general settings are parent-phone concerns and every write behind them
+  // is still refused to a display, so offering them here would be a sheet full
+  // of controls that fail on save.
+  const display = isDisplayClient()
+  const [tab, setTab] = useState<Tab>(display ? 'chores' : 'family')
   const [pinError, setPinError] = useState<string | null>(null)
   const { data: auth } = useAuthStatus()
   const authMutations = useAuthMutations()
@@ -45,8 +51,10 @@ export function SettingsSheet() {
   const close = (): void => {
     setOpen(false)
     setPinError(null)
-    // closing settings re-arms the parental lock immediately
-    if (auth?.pinSet) authMutations.lock.mutate(undefined)
+    // Closing settings re-arms the parental lock immediately - except on a
+    // display, where the header padlock is the explicit control and closing a
+    // sheet must not silently end an editing window the parent opened there.
+    if (!display && auth?.pinSet) authMutations.lock.mutate(undefined)
   }
 
   // The PIN gate guards EVERY way into settings (main-side IPC gating is the
@@ -75,23 +83,25 @@ export function SettingsSheet() {
   }
 
   return (
-    <Sheet open={open} onClose={close} title="Settings" wide>
-      <div className="mb-5">
-        <SegmentedControl
-          value={tab}
-          onChange={setTab}
-          options={[
-            { value: 'family', label: 'Family' },
-            { value: 'calendars', label: 'Calendars' },
-            { value: 'chores', label: 'Chores' },
-            { value: 'general', label: 'General' }
-          ]}
-        />
-      </div>
-      {tab === 'family' && <FamilyTab />}
-      {tab === 'calendars' && <CalendarsTab />}
-      {tab === 'chores' && <ChoresTab />}
-      {tab === 'general' && <GeneralTab />}
+    <Sheet open={open} onClose={close} title={display ? 'Chores & rewards' : 'Settings'} wide>
+      {!display && (
+        <div className="mb-5">
+          <SegmentedControl
+            value={tab}
+            onChange={setTab}
+            options={[
+              { value: 'family', label: 'Family' },
+              { value: 'calendars', label: 'Calendars' },
+              { value: 'chores', label: 'Chores' },
+              { value: 'general', label: 'General' }
+            ]}
+          />
+        </div>
+      )}
+      {!display && tab === 'family' && <FamilyTab />}
+      {!display && tab === 'calendars' && <CalendarsTab />}
+      {(display || tab === 'chores') && <ChoresTab />}
+      {!display && tab === 'general' && <GeneralTab />}
     </Sheet>
   )
 }

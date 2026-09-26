@@ -98,12 +98,22 @@ export function createDisplayReadService(sqlite: Database.Database, chores: Chor
     }
   }
 
+  /**
+   * Chore definitions in the legacy shape the kiosk editor was written for.
+   * The schedule is parsed rather than dropped: before `N20` this reported every
+   * chore as `recurrence: null`, which a display could not act on — but an
+   * editor on the wall would have shown a weekly chore as "once" and, on save,
+   * silently wiped its schedule. A rule the simplified model cannot express
+   * still comes back null, and the editor treats that as "leave it alone".
+   */
   function choreDefinitions(): ChoreDto[] {
-    return sqlite.prepare(`SELECT id, title, icon, person_id, stars_value, due_date, routine, active, sort_order
+    const timezone = householdSettings?.get().timezone ?? 'UTC'
+    return sqlite.prepare(`SELECT id, title, icon, person_id, stars_value, due_date, schedule_rrule, routine, active, sort_order
       FROM chores WHERE deleted_at IS NULL AND person_id IS NOT NULL ORDER BY sort_order, title`).all().map((row) => {
-      const value = row as { id: string; title: string; icon: string | null; person_id: string; stars_value: number; due_date: string | null; routine: 'morning' | 'evening' | null; active: number; sort_order: number }
+      const value = row as { id: string; title: string; icon: string | null; person_id: string; stars_value: number; due_date: string | null; schedule_rrule: string | null; routine: 'morning' | 'evening' | null; active: number; sort_order: number }
       return { id: value.id, title: value.title, icon: value.icon, personId: value.person_id, starsValue: value.stars_value,
-        recurrence: null, anchorDate: value.due_date ?? '1970-01-01', routine: value.routine, active: value.active === 1, sortOrder: value.sort_order }
+        recurrence: value.schedule_rrule === null ? null : parseRRuleString(value.schedule_rrule, timezone),
+        anchorDate: value.due_date ?? '1970-01-01', routine: value.routine, active: value.active === 1, sortOrder: value.sort_order }
     })
   }
 

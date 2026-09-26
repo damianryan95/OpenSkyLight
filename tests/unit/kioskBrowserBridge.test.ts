@@ -84,13 +84,15 @@ describe('browser kiosk display-read RPC bridge', () => {
     database.close()
   })
 
-  it('requires a display credential and refuses every non-chore display mutation', async () => {
+  it('requires a display credential and refuses the mutations K03 still covers', async () => {
     const { database, credential, deps } = setup()
+    // Lists left this list in N20: they are open on the wall by decision, and
+    // displayAuth.test.ts asserts that positively. Everything here still answers
+    // 403 to a display, locked or not.
     for (const channel of [
       'settings:set',
       'people:create', 'people:update', 'people:delete',
-      'rewards:redeem', 'lists:create', 'lists:update', 'lists:delete',
-      'listItems:add', 'listItems:toggle', 'listItems:delete', 'listItems:clearChecked',
+      'rewards:redeem',
       'meals:set', 'home:setLayout'
     ]) {
       const denied = new TestResponse()

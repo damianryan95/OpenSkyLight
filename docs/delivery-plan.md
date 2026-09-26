@@ -153,7 +153,10 @@ settles `N15`'s routing and re-tag rules.
 re-platforming removed. It is last in this milestone because it needs `N06`'s
 write path, and because it is the second ticket to narrow `K03` — the
 read-only display guarantee — so it should land while that decision is fresh
-rather than months later.
+rather than months later. `N20` followed it directly (2026-09-26) and narrowed
+`K03` a third time — chores and rewards administration behind the same PIN,
+lists open on the wall entirely — while the upstream editors it unhides were
+still in the tree.
 
 **Exit criteria:** an external port scan finds no HTTP surface, PIN lockout is
 demonstrable, and a round-trip event edit reaches the parent's own calendar app.
