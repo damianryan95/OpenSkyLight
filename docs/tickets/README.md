@@ -95,6 +95,7 @@ S06 ---> O03       Kiosk parity ---> O01/O02
 - [K04 - Preserve UI parity and add centered scaling](K04-visual-parity.md)
 - [K05 - Add reconnect and stale-data states](K05-connectivity-ui.md)
 - [K06 - Add the celebration animation seam](K06-celebration-seam.md)
+- [K21 - Investigate portrait clipping in the Week view and Stars tile](K21-investigate-portrait-clipping-in-the-wee.md)
 
 ### Parent phone administration
 
