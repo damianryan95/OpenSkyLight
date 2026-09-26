@@ -48,6 +48,19 @@ function periodLabel(view: CalendarViewKind, focusedDate: string, weekStartsOn: 
   return `${start.toFormat('LLLL d')} – ${end.toFormat('d, yyyy')}`
 }
 
+/**
+ * The longest strings `periodLabel` can produce for a view. "September" is the
+ * longest month name; digits are tabular, so any two-digit day and any year
+ * measure the same. A week label is widest when it crosses a month, or a year.
+ */
+function widestPeriodLabels(view: CalendarViewKind): string[] {
+  if (view === 'day' || view === 'chores') return ['September 30, 2026']
+  if (view === 'month') return ['September 2026']
+  if (view === 'agenda') return ['From September 30, 2026']
+  if (view === 'week') return ['September 27 – October 3, 2026', 'December 28, 2025 – January 3, 2026']
+  return []
+}
+
 export function Header() {
   const now = useNow()
   const { data: settings } = useSettings()
@@ -147,9 +160,16 @@ export function Header() {
           <button
             type="button"
             onClick={goToday}
-            className="pressable min-h-12 min-w-16 rounded-xl px-2 py-2 text-center text-base font-extrabold text-ink min-[1500px]:min-w-24"
+            className="pressable grid min-h-12 rounded-xl px-2 py-2 text-center text-base font-extrabold text-ink tabular-nums"
           >
-            {periodLabel(view, focusedDate, weekStartsOn)}
+            {/* The box is as wide as the widest label this view can ever show,
+                so stepping between months does not resize it and shove the
+                view switcher about. The widest candidates sit invisibly in
+                the same grid cell as the live label. */}
+            {widestPeriodLabels(view).map((ghost) => (
+              <span key={ghost} aria-hidden="true" className="invisible col-start-1 row-start-1 whitespace-nowrap">{ghost}</span>
+            ))}
+            <span className="col-start-1 row-start-1 whitespace-nowrap">{periodLabel(view, focusedDate, weekStartsOn)}</span>
           </button>
           <IconButton label="Next" onClick={() => step(1)}>
             <ChevronRightIcon />
