@@ -2,7 +2,8 @@ import { useEffect, useState } from 'react'
 import { DateTime } from 'luxon'
 import { usePeople, useSettings } from '../../api/hooks'
 import { useUi, ZONE } from '../../stores/uiStore'
-import { SegmentedControl, IconButton } from '../../components/ui'
+import { IconButton } from '../../components/ui'
+import { ViewSwitcher } from './ViewSwitcher'
 import { ChevronLeftIcon, ChevronRightIcon, GearIcon } from '../../components/icons'
 import { WeatherButton } from '../weather/WeatherHeader'
 import { initials, textOn } from '../../lib/format'
@@ -10,6 +11,16 @@ import { inViewingContext } from '@shared/viewingContext'
 import type { CalendarViewKind } from '@shared/types'
 import { isDisplayClient } from '../../lib/clientMode'
 import { LockControl } from '../calendar/EditingControls'
+
+const VIEW_OPTIONS: readonly { value: CalendarViewKind; label: string }[] = [
+  { value: 'home', label: 'Home' },
+  { value: 'day', label: 'Day' },
+  { value: 'week', label: 'Week' },
+  { value: 'month', label: 'Month' },
+  { value: 'agenda', label: 'Agenda' },
+  { value: 'chores', label: 'Chores' },
+  { value: 'lists', label: 'Lists' }
+]
 
 function useNow(): DateTime {
   const [now, setNow] = useState(() => DateTime.now().setZone(ZONE))
@@ -52,7 +63,12 @@ export function Header() {
   const timeFormat = settings?.timeFormat ?? '12h'
   const display = isDisplayClient()
   return (
-    <header className="flex items-center gap-2 px-4 pt-5 pb-4 min-[1500px]:gap-3 min-[1500px]:px-5">
+    // A portrait panel has no width for clock, avatars, period picker, seven
+    // views and padlock in one row, and the views were what fell off - leaving
+    // no way back to Home. The view switcher folds what does not fit under
+    // "More"; wrapping is the last resort for a row too narrow for even that,
+    // and a wrapped row keeps its controls at the right, beside the padlock.
+    <header className="flex flex-wrap items-center justify-end gap-2 px-4 pt-5 pb-4 min-[1500px]:gap-3 min-[1500px]:px-5">
       {/* Today + a big clock (the header is the only clock since the home
           screen dropped its clock tile); scales down so everything still
           fits on 1280-wide displays */}
@@ -80,6 +96,7 @@ export function Header() {
 
       <WeatherButton />
 
+      {/* Takes what the switcher does not want, so the switcher stays beside the padlock. */}
       <div className="flex-1" />
 
       {/* Viewing context is one explicit choice, never a collection of hidden people. */}
@@ -138,18 +155,10 @@ export function Header() {
         </div>
       )}
 
-      <SegmentedControl
+      <ViewSwitcher
         value={view}
         onChange={setView}
-        options={[
-          { value: 'home', label: 'Home' },
-          { value: 'day', label: 'Day' },
-          { value: 'week', label: 'Week' },
-          { value: 'month', label: 'Month' },
-          { value: 'agenda', label: 'Agenda' },
-          { value: 'chores', label: 'Chores' },
-          { value: 'lists', label: 'Lists' }
-        ]}
+        options={VIEW_OPTIONS}
       />
 
       {/* A display shows its lock where a desktop shows settings: the one place
